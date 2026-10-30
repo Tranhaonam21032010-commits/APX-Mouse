@@ -161,44 +161,50 @@ class GameOverlayService : Service() {
     }
 
 
+    private val actionOverlays = mutableListOf<View>()
+
     private fun createBubbleOverlay() {
         val density = resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt()
-        val root = FrameLayout(this)
-        val params = WindowManager.LayoutParams(
-            dp(224), dp(224),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = dp(8)
-            y = dp(72)
-        }
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
+        // Each interactive control gets its own small window. A large transparent
+        // touchable window would steal taps from the game across its whole rectangle.
+        val positions = listOf(
+            Triple(92, 4, 48), Triple(28, 62, 48), Triple(8, 122, 48),
+            Triple(106, 154, 48), Triple(164, 112, 48)
+        )
         val actions = listOf(
             createAction("⌨", "Chỉnh sửa keymap") { openMappingEditor() },
             createAction("≋", "Bật / tắt thanh thông số") { toggleStatsOverlay() },
             createAction("–", "Ẩn bong bóng") {
                 manuallyHidden = true
                 setFanOpen(false)
-                root.visibility = View.GONE
+                bubbleRoot?.visibility = View.GONE
             },
             createAction("⚙", "Chỉnh độ phân giải game") { openDisplayScale() },
-            createAction("×", "Thoát phiên overlay") { stopSelf() }
+            createAction("×", "Đóng overlay APX") { stopSelf() }
         )
-        val positions = listOf(Triple(92, 4, 48), Triple(28, 62, 48), Triple(8, 122, 48), Triple(106, 154, 48), Triple(164, 112, 48))
         actions.forEachIndexed { index, view ->
-            val (x, y) = positions[index]
-            root.addView(view, FrameLayout.LayoutParams(dp(48), dp(48)).apply {
-                leftMargin = dp(x)
-                topMargin = dp(y)
-            })
+            val (left, top, size) = positions[index]
+            val params = WindowManager.LayoutParams(
+                dp(size), dp(size), type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.END
+                x = dp(8 + 224 - left - size)
+                y = dp(72 + top)
+            }
             view.visibility = View.GONE
+            try {
+                windowManager.addView(view, params)
+                actionOverlays.add(view)
+            } catch (_: Exception) { }
         }
 
         val bubble = FrameLayout(this).apply {
@@ -215,14 +221,21 @@ class GameOverlayService : Service() {
         }
         bubble.addView(icon, FrameLayout.LayoutParams(-1, -1))
         bubble.setOnClickListener { setFanOpen(!fanOpen) }
-        root.addView(bubble, FrameLayout.LayoutParams(dp(52), dp(52)).apply {
-            leftMargin = dp(164)
-            topMargin = 0
-        })
-        root.visibility = View.GONE
-        bubbleRoot = root
+        val bubbleParams = WindowManager.LayoutParams(
+            dp(52), dp(52), type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.END
+            x = dp(8)
+            y = dp(72)
+        }
+        bubble.visibility = View.GONE
+        bubbleRoot = bubble
         try {
-            windowManager.addView(root, params)
+            windowManager.addView(bubble, bubbleParams)
         } catch (_: Exception) {
             bubbleRoot = null
         }
@@ -247,9 +260,7 @@ class GameOverlayService : Service() {
     private fun setFanOpen(open: Boolean) {
         if (fanOpen == open) return
         fanOpen = open
-        val root = bubbleRoot ?: return
-        for (index in 0 until minOf(5, root.childCount)) {
-            val item = root.getChildAt(index)
+        actionOverlays.forEachIndexed { index, item ->
             item.animate().cancel()
             if (open) {
                 item.visibility = View.VISIBLE
@@ -658,6 +669,8 @@ class GameOverlayService : Service() {
         pingExecutor.shutdownNow()
         overlayRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         bubbleRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
+        actionOverlays.forEach { try { windowManager.removeView(it) } catch (_: Exception) { } }
+        actionOverlays.clear()
         overlayRoot = null
         bubbleRoot = null
         statsView = null
