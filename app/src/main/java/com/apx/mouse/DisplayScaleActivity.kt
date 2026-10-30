@@ -124,7 +124,7 @@ class DisplayScaleActivity : Activity() {
             isFillViewport = true
             clipToPadding = false
             setBackgroundColor(Color.rgb(5, 12, 26))
-            addView(content, ScrollView.LayoutParams(-1, -2))
+            addView(content, android.view.ViewGroup.LayoutParams(-1, -2))
         }
         setContentView(scroll)
     }
