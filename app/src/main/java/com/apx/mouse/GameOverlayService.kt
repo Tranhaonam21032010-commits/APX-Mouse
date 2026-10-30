@@ -21,6 +21,8 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -35,6 +37,10 @@ class GameOverlayService : Service() {
     private var lastUsageEventTime: Long = 0L
     private var gameActivityDestroyedAt: Long? = null
     private var statsView: TextView? = null
+    private val pingExecutor = Executors.newSingleThreadExecutor()
+    private val pingInProgress = AtomicBoolean(false)
+    @Volatile private var networkPingText: String = "--"
+    private var lastPingStartedAt = 0L
 
     private val monitor = object : Runnable {
         override fun run() {
@@ -133,11 +139,36 @@ class GameOverlayService : Service() {
         val scale = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
         val percent = if (level >= 0 && scale > 0) (level * 100 / scale) else -1
         val batteryText = if (percent >= 0) "$percent%" else "--"
-        // Android does not expose reliable per-game FPS or game-server ping
-        // to ordinary overlay apps; keep unavailable values explicit.
-        statsView?.text = "PIN $batteryText    PING --    FPS --"
+        startNetworkPingIfDue()
+        statsView?.text = "PIN $batteryText    PING $networkPingText    FPS --"
     }
 
+    private fun startNetworkPingIfDue() {
+        val now = System.currentTimeMillis()
+        if (now - lastPingStartedAt < 5000L || !pingInProgress.compareAndSet(false, true)) return
+        lastPingStartedAt = now
+        pingExecutor.execute {
+            var result = "--"
+            try {
+                // General Internet latency to Cloudflare DNS, not game-server RTT.
+                val process = ProcessBuilder("ping", "-c", "1", "-W", "2", "1.1.1.1").redirectErrorStream(true).start()
+                val output = process.inputStream.bufferedReader().use { it.readText() }
+                val marker = "time="
+                val pos = output.indexOf(marker)
+                if (pos >= 0) {
+                    val number = output.substring(pos + marker.length).takeWhile { it.isDigit() || it == '.' }
+                    val value = number.toDoubleOrNull()
+                    if (value != null) result = value.toInt().toString() + "ms"
+                }
+                process.destroy()
+            } catch (_: Exception) {
+                result = "--"
+            } finally {
+                networkPingText = result
+                pingInProgress.set(false)
+            }
+        }
+    }
     private fun updateMappingOverlay(inGame: Boolean) {
         val prefs = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
         val visible = prefs.getBoolean(VISIBLE_PREFIX + gamePackage, true)
@@ -330,6 +361,7 @@ class GameOverlayService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        pingExecutor.shutdownNow()
         overlayRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         overlayRoot = null
         statsView = null
