@@ -30,6 +30,9 @@ class GameOverlayService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var windowManager: WindowManager
     private var overlayRoot: FrameLayout? = null
+    private var bubbleRoot: FrameLayout? = null
+    private var fanOpen = false
+    private var manuallyHidden = false
     private var mappingRoot: FrameLayout? = null
     private var renderedMapping: String? = null
     private var gamePackage: String = ""
@@ -56,6 +59,8 @@ class GameOverlayService : Service() {
             }
             val inGame = foreground == gamePackage
             overlayRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
+            bubbleRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
+            if (!inGame) setFanOpen(false)
             updateMappingOverlay(inGame)
             updateStats()
             handler.postDelayed(this, 1000L)
@@ -79,6 +84,7 @@ class GameOverlayService : Service() {
             return START_NOT_STICKY
         }
         if (overlayRoot == null) createOverlay()
+        if (bubbleRoot == null) createBubbleOverlay()
         handler.removeCallbacks(monitor)
         handler.post(monitor)
         return START_NOT_STICKY
@@ -131,6 +137,117 @@ class GameOverlayService : Service() {
             statsView = null
             stopSelf()
         }
+    }
+
+
+    private fun createBubbleOverlay() {
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        val root = FrameLayout(this)
+        val params = WindowManager.LayoutParams(
+            dp(224), dp(224),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.END
+            x = dp(8)
+            y = dp(72)
+        }
+
+        val actions = listOf(
+            createAction("⌨", "Chỉnh sửa keymap") { openMappingEditor() },
+            createAction("–", "Ẩn bong bóng") {
+                manuallyHidden = true
+                setFanOpen(false)
+                root.visibility = View.GONE
+            },
+            createAction("×", "Thoát phiên overlay") { stopSelf() }
+        )
+        val positions = listOf(Triple(92, 4), Triple(106, 68), Triple(164, 112))
+        actions.forEachIndexed { index, view ->
+            val (x, y) = positions[index]
+            root.addView(view, FrameLayout.LayoutParams(dp(48), dp(48)).apply {
+                leftMargin = dp(x)
+                topMargin = dp(y)
+            })
+            view.visibility = View.GONE
+        }
+
+        val bubble = FrameLayout(this).apply {
+            background = circle(Color.rgb(17, 35, 62), dp(28).toFloat(), Color.rgb(64, 145, 255), dp(2))
+            elevation = dp(8).toFloat()
+            contentDescription = "Mở menu APX MOUSE"
+            isClickable = true
+        }
+        val icon = ImageView(this).apply {
+            val appIcon = try { packageManager.getApplicationIcon(packageName) } catch (_: Exception) { null }
+            if (appIcon != null) setImageDrawable(appIcon) else setImageResource(android.R.drawable.sym_def_app_icon)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(7), dp(7), dp(7), dp(7))
+        }
+        bubble.addView(icon, FrameLayout.LayoutParams(-1, -1))
+        bubble.setOnClickListener { setFanOpen(!fanOpen) }
+        root.addView(bubble, FrameLayout.LayoutParams(dp(52), dp(52)).apply {
+            leftMargin = dp(164)
+            topMargin = 0
+        })
+        root.visibility = View.GONE
+        bubbleRoot = root
+        try {
+            windowManager.addView(root, params)
+        } catch (_: Exception) {
+            bubbleRoot = null
+        }
+    }
+
+    private fun createAction(symbol: String, label: String, action: () -> Unit): View {
+        val density = resources.displayMetrics.density
+        val size = (48 * density).toInt()
+        return TextView(this).apply {
+            text = symbol
+            textSize = 21f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = circle(Color.rgb(22, 45, 76), size / 2f, Color.rgb(64, 145, 255), (1.5f * density).toInt())
+            elevation = 7 * density
+            contentDescription = label
+            isClickable = true
+            setOnClickListener { action() }
+        }
+    }
+
+    private fun setFanOpen(open: Boolean) {
+        if (fanOpen == open) return
+        fanOpen = open
+        val root = bubbleRoot ?: return
+        for (index in 0 until minOf(3, root.childCount)) {
+            val item = root.getChildAt(index)
+            item.animate().cancel()
+            if (open) {
+                item.visibility = View.VISIBLE
+                item.alpha = 0f
+                item.scaleX = 0.25f
+                item.scaleY = 0.25f
+                item.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                    .setStartDelay(index * 35L).setDuration(180L).start()
+            } else {
+                item.animate().alpha(0f).scaleX(0.25f).scaleY(0.25f)
+                    .setStartDelay(0L).setDuration(120L)
+                    .withEndAction { item.visibility = View.GONE }.start()
+            }
+        }
+    }
+
+    private fun openMappingEditor() {
+        setFanOpen(false)
+        startActivity(Intent(this, MappingEditor::class.java)
+            .putExtra(MappingEditor.EXTRA_GAME_PACKAGE, gamePackage)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     private fun updateStats() {
@@ -319,7 +436,9 @@ class GameOverlayService : Service() {
         handler.removeCallbacksAndMessages(null)
         pingExecutor.shutdownNow()
         overlayRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
+        bubbleRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         overlayRoot = null
+        bubbleRoot = null
         statsView = null
         removeMappingOverlay()
         super.onDestroy()
