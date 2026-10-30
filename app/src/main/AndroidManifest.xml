@@ -42,6 +42,11 @@
         </service>
 
         <activity
+            android:name=".MouseTweakActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <activity
             android:name=".DisplayScaleActivity"
             android:exported="false"
             android:screenOrientation="landscape" />
