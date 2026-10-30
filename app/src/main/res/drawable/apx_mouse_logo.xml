@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="512dp"
+    android:height="512dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <path android:fillColor="#050B16" android:pathData="M256,8 A248,248 0,1 0,256 504 A248,248 0,1 0,256 8"/>
+    <path android:fillColor="#07182B" android:strokeColor="#00BFFF" android:strokeWidth="10" android:pathData="M256,20 A236,236 0,1 0,256 492 A236,236 0,1 0,256 20"/>
+    <path android:fillColor="#102A45" android:strokeColor="#00BFFF" android:strokeWidth="7" android:strokeLineJoin="round"
+        android:pathData="M145,222 L112,106 L205,150 L256,75 L307,150 L400,106 L367,222 L385,285 L345,351 L256,398 L167,351 L127,285 Z"/>
+    <path android:fillColor="#020812" android:pathData="M155,220 L145,143 L211,181 L256,111 L301,181 L367,143 L357,220 L338,285 L256,354 L174,285 Z"/>
+    <path android:fillColor="#00C8FF" android:pathData="M169,245 L232,231 L204,260 Z M343,245 L280,231 L308,260 Z"/>
+    <path android:fillColor="#00BFFF" android:pathData="M256,252 L231,291 L256,307 L281,291 Z"/>
+    <path android:fillColor="#0B2036" android:strokeColor="#00BFFF" android:strokeWidth="6" android:pathData="M73,330 C73,296 103,276 132,292 L176,319 L176,405 C176,434 151,454 124,444 L94,432 C81,426 73,411 73,396 Z"/>
+    <path android:fillColor="#00BFFF" android:pathData="M122,303 C132,298 143,303 143,315 L143,366 C143,378 122,378 122,366 Z"/>
+    <path android:fillColor="#0B2036" android:strokeColor="#00BFFF" android:strokeWidth="5" android:pathData="M304,352 L344,352 L344,390 L304,390 Z M352,362 L392,362 L392,400 L352,400 Z M400,372 L440,372 L440,410 L400,410 Z"/>
+    <path android:fillColor="#00C8FF" android:pathData="M315,363 L333,363 L333,379 L315,379 Z M363,373 L381,373 L381,389 L363,389 Z M411,383 L429,383 L429,399 L411,399 Z"/>
+    <path android:fillColor="#00BFFF" android:pathData="M160,454 L206,454 L224,475 L176,475 Z M235,454 L277,454 L277,475 L235,475 Z M288,454 L352,454 L333,475 L288,475 Z"/>
+</vector>
