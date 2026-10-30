@@ -227,7 +227,7 @@ class MainActivity : Activity() {
             "MỞ TRÌNH CHỈNH SỬA"
         ) {
             startActivity(Intent(this, MappingEditor::class.java))
-        }, LinearLayout.LayoutParams(0, -1, 1f))
+        }, LinearLayout.LayoutParams(0, -2, 1f))
         cardsRow.addView(View(this), LinearLayout.LayoutParams(dp(12), 1))
         cardsRow.addView(featureCard(
             "02", "Shizuku Manager", "Mở ứng dụng Shizuku để kiểm tra dịch vụ và kết nối.",
