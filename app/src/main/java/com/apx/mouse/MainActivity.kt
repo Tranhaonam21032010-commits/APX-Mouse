@@ -166,9 +166,9 @@ class MainActivity : Activity() {
             val label = packageManager.getApplicationLabel(info).toString()
             val col = index % 2
             val row = index / 2
-            val x = 500f + col * 466f
-            val y = 250f + row * 260f
-            val panel = addDynamicPanel(x, y, 438f, 226f, intArrayOf(Color.rgb(24, 62, 105), Color.rgb(9, 24, 48)), 24f)
+            val x = 145f + col * 640f
+            val y = 320f + row * 260f
+            val panel = addDynamicPanel(x, y, 590f, 220f, intArrayOf(Color.rgb(24, 62, 105), Color.rgb(9, 24, 48)), 24f)
             panel.isClickable = true
             panel.setOnClickListener { launchSelectedApp(packageName) }
             panel.setOnLongClickListener { confirmRemoveApp(packageName, label); true }
@@ -179,10 +179,10 @@ class MainActivity : Activity() {
                 setOnClickListener { launchSelectedApp(packageName) }
             }
             dynamicViews += icon
-            addAt(icon, x + 24f, y + 62f, 104f, 104f)
-            val name = addDynamicText(label, x + 150f, y + 52f, 260f, 64f, 27f, white, true)
-            val subtitle = addDynamicText("GAME / APP", x + 150f, y + 112f, 250f, 28f, 15f, muted, true)
-            val open = addDynamicText("MỞ ỨNG DỤNG  →", x + 150f, y + 157f, 250f, 34f, 18f, blue, true)
+            addAt(icon, x + 28f, y + 56f, 108f, 108f)
+            val name = addDynamicText(label, x + 158f, y + 48f, 405f, 64f, 27f, white, true)
+            val subtitle = addDynamicText("GAME / APP", x + 158f, y + 110f, 380f, 28f, 15f, muted, true)
+            val open = addDynamicText("MỞ ỨNG DỤNG  →", x + 158f, y + 156f, 380f, 34f, 18f, blue, true)
             listOf(name, subtitle, open).forEach { item ->
                 item.isClickable = true
                 item.setOnClickListener { launchSelectedApp(packageName) }
@@ -191,14 +191,14 @@ class MainActivity : Activity() {
         }
         if (packages.isNotEmpty()) {
             val pageCountText = "TRANG " + (appPage + 1) + " / " + pageCount + "   ·   " + packages.size + " ỨNG DỤNG"
-            val indicator = addDynamicText(pageCountText, 610f, 793f, 600f, 34f, 17f, muted, true)
+            val indicator = addDynamicText(pageCountText, 500f, 900f, 600f, 34f, 17f, muted, true)
             indicator.gravity = Gravity.CENTER
-            val previous = addDynamicText("‹", 520f, 785f, 64f, 48f, 36f, blue, true)
+            val previous = addDynamicText("‹", 390f, 892f, 64f, 48f, 36f, blue, true)
             previous.gravity = Gravity.CENTER
             previous.isClickable = appPage > 0
             previous.alpha = if (appPage > 0) 1f else 0.25f
             previous.setOnClickListener { if (appPage > 0) { appPage--; renderGameSpace(true) } }
-            val next = addDynamicText("›", 1230f, 785f, 64f, 48f, 36f, blue, true)
+            val next = addDynamicText("›", 1160f, 892f, 64f, 48f, 36f, blue, true)
             next.gravity = Gravity.CENTER
             next.isClickable = appPage < pageCount - 1
             next.alpha = if (appPage < pageCount - 1) 1f else 0.25f
@@ -267,7 +267,7 @@ class MainActivity : Activity() {
         val options = arrayOf(
             "Hiện ứng dụng hệ thống trong danh sách Thêm app",
             "Xóa toàn bộ ứng dụng khỏi Game Space",
-            "Thông tin APX MOUSE"
+            "Giới thiệu APX MOUSE · Phiên bản"
         )
         AlertDialog.Builder(this)
             .setTitle("Cài đặt")
@@ -361,7 +361,7 @@ class MainActivity : Activity() {
         val width = canvas.width.toFloat()
         val height = canvas.height.toFloat()
         if (width <= 0f || height <= 0f) return
-        val scale = min(width / 1920f, height / 1080f)
+        val scale = maxOf(width / 1920f, height / 1080f)
         val offsetX = (width - 1920f * scale) / 2f
         val offsetY = (height - 1080f * scale) / 2f
         placements.forEach { item ->
