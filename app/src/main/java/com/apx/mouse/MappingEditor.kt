@@ -146,7 +146,7 @@ class MappingEditor : Activity() {
     private fun toast(message: String) =
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
-    private inner class MappingCanvas : View(this) {
+    private inner class MappingCanvas : View(this@MappingEditor) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private var dragging = false
 
