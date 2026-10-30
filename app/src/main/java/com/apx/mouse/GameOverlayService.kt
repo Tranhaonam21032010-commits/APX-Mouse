@@ -214,10 +214,10 @@ class GameOverlayService : Service() {
             isClickable = true
         }
         val icon = ImageView(this).apply {
-            val appIcon = try { packageManager.getApplicationIcon(packageName) } catch (_: Exception) { null }
-            if (appIcon != null) setImageDrawable(appIcon) else setImageResource(android.R.drawable.sym_def_app_icon)
+            // Use the APX wolf logo asset directly, not the launcher/adaptive icon wrapper.
+            setImageResource(R.drawable.apx_mouse_logo)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(dp(7), dp(7), dp(7), dp(7))
+            setPadding(dp(5), dp(5), dp(5), dp(5))
         }
         bubble.addView(icon, FrameLayout.LayoutParams(-1, -1))
         bubble.setOnClickListener { setFanOpen(!fanOpen) }
