@@ -107,72 +107,20 @@ class MainActivity : Activity() {
         val settings = addText("Cài đặt", 1707f, 68f, 140f, 35f, 22f, white, true)
         addClick(settings) { toast("Mục Cài đặt chưa được tích hợp") }
 
-        // Left game tile — NFS No Limits
-        addPanel(45f, 202f, 458f, 519f, intArrayOf(
-            Color.rgb(18, 38, 69), Color.rgb(8, 17, 36), Color.rgb(17, 44, 76)
+        // Empty Game Space state. The Canva game names were examples only;
+        // never show fictional or preselected apps in a fresh installation.
+        addPanel(45f, 202f, 1830f, 519f, intArrayOf(
+            Color.rgb(18, 38, 69), Color.rgb(8, 17, 36), Color.rgb(12, 27, 51)
         ), 24f)
-        addPanel(67f, 225f, 414f, 270f, intArrayOf(
-            Color.rgb(31, 86, 133), Color.rgb(12, 29, 58), Color.rgb(8, 17, 35)
-        ), 18f)
-        addText("NFS", 103f, 292f, 320f, 108f, 76f, white, true, Gravity.CENTER)
-        addText("NO LIMITS", 116f, 382f, 290f, 42f, 23f, Color.rgb(154, 207, 255), true, Gravity.CENTER)
-        addText("NFS No Limits", 222f, 569f, 250f, 42f, 27f, white, true)
-        addPanel(246f, 612f, 118f, 38f, intArrayOf(
-            Color.rgb(16, 112, 86), Color.rgb(12, 78, 70)
-        ), 18f)
-        addText("Sẵn sàng", 255f, 621f, 105f, 28f, 18f, Color.rgb(180, 255, 226), true)
-        addPanel(67f, 539f, 139f, 137f, intArrayOf(
-            Color.rgb(18, 65, 105), Color.rgb(11, 26, 51)
-        ), 18f)
-        addText("N", 83f, 550f, 106f, 104f, 78f, white, true, Gravity.CENTER)
-        addText("+", 205f, 607f, 46f, 46f, 28f, blue, true, Gravity.CENTER)
-
-        // Center featured game — Shadow Ronin
-        addPanel(434f, 89f, 1029f, 766f, intArrayOf(
-            Color.rgb(17, 48, 78), Color.rgb(10, 23, 46), Color.rgb(6, 13, 29)
-        ), 26f)
-        addPanel(457f, 112f, 983f, 720f, intArrayOf(
-            Color.rgb(31, 83, 119), Color.rgb(15, 42, 70), Color.rgb(8, 17, 36)
+        addPanel(70f, 227f, 1780f, 469f, intArrayOf(
+            Color.rgb(15, 31, 57), Color.rgb(9, 19, 39)
         ), 20f)
-        addText("影", 610f, 360f, 230f, 230f, 142f, Color.rgb(210, 229, 255), true, Gravity.CENTER)
-        addPanel(790f, 220f, 3f, 400f, intArrayOf(
-            Color.rgb(55, 145, 220), Color.rgb(55, 145, 220)
-        ), 2f)
-        addText("SHADOW", 812f, 368f, 400f, 52f, 26f, Color.rgb(160, 210, 255), true)
-        addText("Shadow Ronin", 804f, 449f, 420f, 62f, 42f, white, true)
-        addPanel(839f, 512f, 150f, 43f, intArrayOf(
-            Color.rgb(15, 111, 87), Color.rgb(10, 77, 69)
-        ), 20f)
-        addText("Sẵn sàng", 849f, 518f, 135f, 35f, 19f, Color.rgb(182, 255, 226), true)
-        val openMapping = addText("MỞ  ›", 900f, 610f, 165f, 58f, 24f, white, true, Gravity.CENTER)
-        addPanel(890f, 607f, 245f, 60f, intArrayOf(
-            Color.rgb(44, 126, 224), Color.rgb(25, 75, 145)
-        ), 18f)
-        // Keep the action label above its button surface.
-        canvas.removeView(openMapping)
-        val openButton = addText("MỞ  ›", 890f, 607f, 245f, 60f, 24f, white, true, Gravity.CENTER)
-        addClick(openButton) {
-            startActivity(Intent(this, MappingEditor::class.java))
-        }
-
-        // Right game tile — Starfall Legion
-        addPanel(1394f, 202f, 481f, 519f, intArrayOf(
-            Color.rgb(28, 39, 83), Color.rgb(11, 17, 43), Color.rgb(9, 16, 35)
-        ), 24f)
-        addPanel(1417f, 225f, 435f, 270f, intArrayOf(
-            Color.rgb(51, 77, 143), Color.rgb(23, 34, 76), Color.rgb(8, 17, 37)
-        ), 18f)
-        addText("✦", 1470f, 268f, 320f, 160f, 112f, Color.rgb(193, 219, 255), true, Gravity.CENTER)
-        addText("STARFALL", 1465f, 416f, 340f, 42f, 24f, Color.rgb(175, 206, 255), true, Gravity.CENTER)
-        addText("Starfall Legion", 1553f, 569f, 290f, 42f, 27f, white, true)
-        addPanel(1567f, 612f, 120f, 38f, intArrayOf(
-            Color.rgb(16, 112, 86), Color.rgb(12, 78, 70)
-        ), 18f)
-        addText("Sẵn sàng", 1582f, 621f, 108f, 28f, 18f, Color.rgb(180, 255, 226), true)
-        addPanel(1417f, 539f, 115f, 137f, intArrayOf(
-            Color.rgb(45, 75, 135), Color.rgb(16, 27, 57)
-        ), 18f)
-        addText("✦", 1425f, 553f, 98f, 104f, 76f, white, true, Gravity.CENTER)
+        addText("+", 820f, 325f, 280f, 150f, 112f, blue, true, Gravity.CENTER)
+        addText("CHƯA CÓ ỨNG DỤNG", 650f, 480f, 620f, 54f, 30f, white, true, Gravity.CENTER)
+        addText(
+            "Chọn “Thêm app” để đưa ứng dụng đã cài vào Game Space",
+            460f, 542f, 1000f, 42f, 20f, muted, false, Gravity.CENTER
+        )
 
         // System permissions / Shizuku card
         addPanel(1279f, 787f, 596f, 271f, intArrayOf(
