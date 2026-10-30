@@ -63,21 +63,10 @@ class GameOverlayService : Service() {
                 return
             }
             val foreground = currentForegroundPackage()
-            val destroyedAt = gameActivityDestroyedAt
-            if (destroyedAt != null && System.currentTimeMillis() - destroyedAt > 2500L) {
-                stopSelf()
-                return
-            }
+            // Keep the foreground service alive while the player visits Home or another app.
+            // The overlay is hidden outside the selected game and reappears when that game resumes.
             val inGame = foreground == gamePackage
-            if (inGame || foreground == packageName) {
-                outsideGameSince = null
-            } else {
-                val since = outsideGameSince ?: System.currentTimeMillis().also { outsideGameSince = it }
-                if (System.currentTimeMillis() - since > 4000L) {
-                    stopSelf()
-                    return
-                }
-            }
+            if (inGame) outsideGameSince = null
             overlayRoot?.visibility = if (inGame && isStatsEnabled()) View.VISIBLE else View.GONE
             bubbleRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
             if (!inGame) setFanOpen(false)
@@ -100,6 +89,7 @@ class GameOverlayService : Service() {
         lastUsageEventTime = System.currentTimeMillis() - 30_000L
         gameActivityDestroyedAt = null
         outsideGameSince = null
+        manuallyHidden = false
         if (gamePackage.isBlank() || !android.provider.Settings.canDrawOverlays(this) || !hasUsageAccess()) {
             stopSelf()
             return START_NOT_STICKY
@@ -175,7 +165,7 @@ class GameOverlayService : Service() {
         // touchable window would steal taps from the game across its whole rectangle.
         val positions = listOf(
             Triple(96, 0, 52), Triple(30, 46, 52), Triple(0, 106, 52),
-            Triple(36, 166, 52), Triple(112, 166, 52), Triple(172, 106, 52)
+            Triple(36, 166, 52), Triple(112, 166, 52), Triple(172, 46, 52), Triple(172, 106, 52)
         )
         val actions = listOf(
             createAction("⌨", "Chỉnh sửa keymap") { openMappingEditor() },
@@ -187,7 +177,8 @@ class GameOverlayService : Service() {
                 bubbleRoot?.visibility = View.GONE
             },
             createAction("⚙", "Chỉnh độ phân giải game") { openDisplayScale() },
-            createAction("×", "Đóng overlay APX") { stopSelf() }
+            createAction("⌄", "Đóng menu") { setFanOpen(false) },
+            createAction("×", "Tắt overlay APX") { stopSelf() }
         )
         actions.forEachIndexed { index, view ->
             val (left, top, size) = positions[index]
