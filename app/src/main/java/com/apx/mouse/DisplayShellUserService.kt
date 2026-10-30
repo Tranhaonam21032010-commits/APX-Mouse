@@ -24,7 +24,7 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
 
     override fun captureInputEvents(seconds: Int): String {
         val duration = seconds.coerceIn(2, 8)
-        return runDiagnostic("timeout ${duration}s getevent -lt 2>&1", (duration + 2).toLong()
+        return runDiagnostic("timeout ${duration}s getevent -lt 2>&1", (duration + 2).toLong())
     }
 
     private fun runDiagnostic(command: String, timeoutSeconds: Long): String {
