@@ -14,7 +14,10 @@ import android.provider.Settings
 import android.app.AppOpsManager
 import android.content.Context
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
+import android.widget.ImageView
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -29,6 +32,10 @@ class MainActivity : Activity() {
     private val backgroundViews = mutableMapOf<View, Pair<IntArray, Float>>()
     private val dynamicViews = mutableListOf<View>()
     private val emptyStateViews = mutableListOf<View>()
+    private var appPage = 0
+    private var swipeStartX = 0f
+    private var swipeStartY = 0f
+    private var pagingGesture = false
 
     private val canvasBackground = Color.rgb(7, 12, 27)
     private val white = Color.rgb(239, 244, 255)
@@ -107,7 +114,7 @@ class MainActivity : Activity() {
         addPanel(434f, 90f, 1029f, 766f,
             intArrayOf(Color.rgb(18, 39, 72), Color.rgb(7, 15, 32), Color.rgb(12, 27, 52)), 28f)
         addText("TRÒ CHƠI CỦA BẠN", 490f, 133f, 620f, 42f, 25f, white, true)
-        addText("Chọn game trong thư viện để mở nhanh", 492f, 180f, 700f, 30f, 17f, muted, false)
+        addText("Chọn game trong thư viện để mở nhanh · Vuốt ngang để chuyển trang", 492f, 180f, 850f, 34f, 19f, muted, false)
 
         emptyStateViews += addText("+", 805f, 385f, 280f, 130f, 100f, blue, true, Gravity.CENTER)
         emptyStateViews += addText("CHƯA CÓ ỨNG DỤNG", 650f, 530f, 620f, 48f, 27f, white, true, Gravity.CENTER)
@@ -173,7 +180,7 @@ class MainActivity : Activity() {
             .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
     }
 
-    private fun renderGameSpace() {
+    private fun renderGameSpace(animateFromRight: Boolean = false) {
         dynamicViews.forEach { view ->
             canvas.removeView(view)
             placements.removeAll { it.view === view }
@@ -181,40 +188,75 @@ class MainActivity : Activity() {
             backgroundViews.remove(view)
         }
         dynamicViews.clear()
-
         val packages = selectedPackages.filter { packageManager.getLaunchIntentForPackage(it) != null }.sorted()
+        val pageCount = ((packages.size + 3) / 4).coerceAtLeast(1)
+        appPage = appPage.coerceIn(0, pageCount - 1)
         emptyStateViews.forEach { it.visibility = if (packages.isEmpty()) View.VISIBLE else View.GONE }
-
-        packages.take(6).forEachIndexed { index, packageName ->
+        packages.drop(appPage * 4).take(4).forEachIndexed { index, packageName ->
             val info = packageManager.getApplicationInfo(packageName, 0)
             val label = packageManager.getApplicationLabel(info).toString()
             val col = index % 2
             val row = index / 2
-            val x = 520f + col * 450f
-            val y = 250f + row * 190f
-            addDynamicPanel(x, y, 405f, 154f,
-                intArrayOf(Color.rgb(25, 55, 94), Color.rgb(10, 24, 47)), 20f)
-            val name = addDynamicText(label, x + 24f, y + 28f, 350f, 48f, 23f, white, true)
-            addClick(name) { launchSelectedApp(packageName) }
-            val open = addDynamicText("MỞ ỨNG DỤNG", x + 24f, y + 96f, 350f, 30f, 16f, blue, true)
-            addClick(open) { launchSelectedApp(packageName) }
-            name.setOnLongClickListener {
-                confirmRemoveApp(packageName, label)
-                true
+            val x = 500f + col * 466f
+            val y = 250f + row * 260f
+            val panel = addDynamicPanel(x, y, 438f, 226f, intArrayOf(Color.rgb(24, 62, 105), Color.rgb(9, 24, 48)), 24f)
+            panel.isClickable = true
+            panel.setOnClickListener { launchSelectedApp(packageName) }
+            panel.setOnLongClickListener { confirmRemoveApp(packageName, label); true }
+            val icon = ImageView(this).apply {
+                setImageDrawable(packageManager.getApplicationIcon(info))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                isClickable = true
+                setOnClickListener { launchSelectedApp(packageName) }
             }
-            open.setOnLongClickListener {
-                confirmRemoveApp(packageName, label)
-                true
+            dynamicViews += icon
+            addAt(icon, x + 24f, y + 62f, 104f, 104f)
+            val name = addDynamicText(label, x + 150f, y + 52f, 260f, 64f, 27f, white, true)
+            val subtitle = addDynamicText("GAME / APP", x + 150f, y + 112f, 250f, 28f, 15f, muted, true)
+            val open = addDynamicText("MỞ ỨNG DỤNG  →", x + 150f, y + 157f, 250f, 34f, 18f, blue, true)
+            listOf(name, subtitle, open).forEach { item ->
+                item.isClickable = true
+                item.setOnClickListener { launchSelectedApp(packageName) }
+                item.setOnLongClickListener { confirmRemoveApp(packageName, label); true }
             }
         }
-        if (packages.size > 6) {
-            val more = addDynamicText("Còn ${packages.size - 6} ứng dụng trong thư viện",
-                520f, 830f, 700f, 28f, 16f, muted, false)
-            more.isClickable = false
+        if (packages.isNotEmpty()) {
+            val pageCountText = "TRANG " + (appPage + 1) + " / " + pageCount + "   ·   " + packages.size + " ỨNG DỤNG"
+            val indicator = addDynamicText(pageCountText, 610f, 793f, 600f, 34f, 17f, muted, true)
+            indicator.gravity = Gravity.CENTER
+            val previous = addDynamicText("‹", 520f, 785f, 64f, 48f, 36f, blue, true)
+            previous.gravity = Gravity.CENTER
+            previous.isClickable = appPage > 0
+            previous.alpha = if (appPage > 0) 1f else 0.25f
+            previous.setOnClickListener { if (appPage > 0) { appPage--; renderGameSpace(true) } }
+            val next = addDynamicText("›", 1230f, 785f, 64f, 48f, 36f, blue, true)
+            next.gravity = Gravity.CENTER
+            next.isClickable = appPage < pageCount - 1
+            next.alpha = if (appPage < pageCount - 1) 1f else 0.25f
+            next.setOnClickListener { if (appPage < pageCount - 1) { appPage++; renderGameSpace(true) } }
         }
         layoutCanvas()
+        if (animateFromRight) dynamicViews.forEach { item ->
+            item.translationX = 28f
+            item.alpha = 0.7f
+            item.animate().translationX(0f).alpha(1f).setDuration(50L).start()
+        }
     }
 
+    private fun addDynamicPanel(x: Float, y: Float, width: Float, height: Float, colors: IntArray, radius: Float): View {
+        val view = View(this)
+        dynamicViews += view
+        backgroundViews[view] = Pair(colors, radius)
+        view.background = gradient(colors, radius)
+        addAt(view, x, y, width, height)
+        return view
+    }
+
+    private fun addDynamicText(value: String, x: Float, y: Float, width: Float, height: Float, size: Float, color: Int, bold: Boolean): TextView {
+        val view = addText(value, x, y, width, height, size, color, bold)
+        dynamicViews += view
+        return view
+    }
     private fun confirmRemoveApp(packageName: String, label: String) {
         AlertDialog.Builder(this)
             .setTitle("Xóa khỏi Game Space?")
@@ -330,12 +372,13 @@ class MainActivity : Activity() {
         return view
     }
 
-    private fun addDynamicPanel(x: Float, y: Float, width: Float, height: Float, colors: IntArray, radius: Float) {
+    private fun addDynamicPanel(x: Float, y: Float, width: Float, height: Float, colors: IntArray, radius: Float): View {
         val view = View(this)
         dynamicViews += view
         backgroundViews[view] = Pair(colors, radius)
         view.background = gradient(colors, radius)
         addAt(view, x, y, width, height)
+        return view
     }
 
     private fun addDynamicText(
@@ -375,7 +418,7 @@ class MainActivity : Activity() {
             params.topMargin = (offsetY + item.y * scale).toInt()
             item.view.layoutParams = params
             if (item.view is TextView) {
-                textSizes[item.view]?.let { item.view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, it * scale) }
+                textSizes[item.view]?.let { item.view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, it * scale * 1.16f) }
             }
             backgroundViews[item.view]?.let { (colors, radius) ->
                 item.view.background = gradient(colors, radius * scale)
@@ -388,6 +431,30 @@ class MainActivity : Activity() {
 
     private fun rounded(color: Int, radius: Float) =
         GradientDrawable().apply { setColor(color); cornerRadius = radius }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { swipeStartX = event.x; swipeStartY = event.y; pagingGesture = false }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.x - swipeStartX
+                val dy = event.y - swipeStartY
+                val threshold = ViewConfiguration.get(this).scaledTouchSlop * 2
+                if (!pagingGesture && kotlin.math.abs(dx) > threshold && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.25f) {
+                    pagingGesture = true
+                    val cancel = MotionEvent.obtain(event).apply { action = MotionEvent.ACTION_CANCEL }
+                    super.dispatchTouchEvent(cancel)
+                    cancel.recycle()
+                    val count = selectedPackages.filter { packageManager.getLaunchIntentForPackage(it) != null }.size
+                    val pages = ((count + 3) / 4).coerceAtLeast(1)
+                    appPage = (appPage + if (dx < 0) 1 else -1).coerceIn(0, pages - 1)
+                    renderGameSpace(true)
+                }
+                if (pagingGesture) return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (pagingGesture) { pagingGesture = false; return true }
+        }
+        return super.dispatchTouchEvent(event)
+    }
 
     override fun onResume() {
         super.onResume()
