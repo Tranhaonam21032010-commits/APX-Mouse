@@ -239,7 +239,7 @@ class MainActivity : Activity() {
             if (!Settings.canDrawOverlays(this)) {
                 toast("Cấp quyền hiển thị trên ứng dụng khác để dùng overlay")
                 startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    android.net.Uri.parse("package:$packageName")))
+                    android.net.Uri.parse("package:${this.packageName}")))
                 return
             }
             if (!hasUsageAccess()) {
