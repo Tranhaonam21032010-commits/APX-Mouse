@@ -39,6 +39,7 @@ class GameOverlayService : Service() {
     private var lastForegroundPackage: String? = null
     private var lastUsageEventTime: Long = 0L
     private var gameActivityDestroyedAt: Long? = null
+    private var outsideGameSince: Long? = null
     private var statsView: TextView? = null
     private val pingExecutor = Executors.newSingleThreadExecutor()
     private val pingInProgress = AtomicBoolean(false)
@@ -58,6 +59,15 @@ class GameOverlayService : Service() {
                 return
             }
             val inGame = foreground == gamePackage
+            if (inGame || foreground == packageName) {
+                outsideGameSince = null
+            } else {
+                val since = outsideGameSince ?: System.currentTimeMillis().also { outsideGameSince = it }
+                if (System.currentTimeMillis() - since > 4000L) {
+                    stopSelf()
+                    return
+                }
+            }
             overlayRoot?.visibility = if (inGame && isStatsEnabled()) View.VISIBLE else View.GONE
             bubbleRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
             if (!inGame) setFanOpen(false)
@@ -79,10 +89,12 @@ class GameOverlayService : Service() {
         lastForegroundPackage = null
         lastUsageEventTime = System.currentTimeMillis() - 30_000L
         gameActivityDestroyedAt = null
+        outsideGameSince = null
         if (gamePackage.isBlank() || !android.provider.Settings.canDrawOverlays(this) || !hasUsageAccess()) {
             stopSelf()
             return START_NOT_STICKY
         }
+        DisplayScaleController.captureOriginal(this)
         if (overlayRoot == null) createOverlay()
         if (bubbleRoot == null) createBubbleOverlay()
         handler.removeCallbacks(monitor)
@@ -167,9 +179,10 @@ class GameOverlayService : Service() {
                 setFanOpen(false)
                 root.visibility = View.GONE
             },
+            createAction("⚙", "Chỉnh độ phân giải game") { openDisplayScale() },
             createAction("×", "Thoát phiên overlay") { stopSelf() }
         )
-        val positions = listOf(Triple(92, 4, 48), Triple(28, 62, 48), Triple(106, 68, 48), Triple(164, 112, 48))
+        val positions = listOf(Triple(92, 4, 48), Triple(28, 62, 48), Triple(8, 122, 48), Triple(106, 154, 48), Triple(164, 112, 48))
         actions.forEachIndexed { index, view ->
             val (x, y) = positions[index]
             root.addView(view, FrameLayout.LayoutParams(dp(48), dp(48)).apply {
@@ -226,7 +239,7 @@ class GameOverlayService : Service() {
         if (fanOpen == open) return
         fanOpen = open
         val root = bubbleRoot ?: return
-        for (index in 0 until minOf(4, root.childCount)) {
+        for (index in 0 until minOf(5, root.childCount)) {
             val item = root.getChildAt(index)
             item.animate().cancel()
             if (open) {
@@ -254,6 +267,12 @@ class GameOverlayService : Service() {
         prefs.edit().putBoolean(STATS_VISIBLE_PREFIX + gamePackage, enabled).apply()
         overlayRoot?.visibility = if (enabled) View.VISIBLE else View.GONE
         setFanOpen(false)
+    }
+
+    private fun openDisplayScale() {
+        setFanOpen(false)
+        startActivity(Intent(this, DisplayScaleActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     private fun openMappingEditor() {
@@ -454,6 +473,7 @@ class GameOverlayService : Service() {
         bubbleRoot = null
         statsView = null
         removeMappingOverlay()
+        DisplayScaleController.restore(this)
         super.onDestroy()
     }
 
