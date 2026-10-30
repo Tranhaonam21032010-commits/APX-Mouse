@@ -18,6 +18,8 @@
     <application
         android:allowBackup="true"
         android:label="APX MOUSE"
+        android:icon="@drawable/apx_mouse_logo"
+        android:roundIcon="@drawable/apx_mouse_logo"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:supportsRtl="true">
 
