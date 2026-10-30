@@ -9,25 +9,36 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.widget.LinearLayout
-import android.widget.ScrollView
+import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import rikka.shizuku.Shizuku
+import kotlin.math.min
 
 class MainActivity : Activity() {
 
-    private val background = Color.rgb(10, 15, 28)
-    private val sidebarColor = Color.rgb(14, 22, 39)
-    private val panelColor = Color.rgb(20, 30, 51)
-    private val blue = Color.rgb(59, 130, 246)
-    private val muted = Color.rgb(151, 165, 190)
-    private val white = Color.rgb(240, 245, 255)
-    private val green = Color.rgb(52, 211, 153)
+    private data class Placement(
+        val view: View,
+        val x: Float,
+        val y: Float,
+        val width: Float,
+        val height: Float
+    )
 
-    private lateinit var statusText: TextView
-    private lateinit var statusPill: TextView
-    private lateinit var statusDot: View
+    private val placements = mutableListOf<Placement>()
+    private val textSizes = mutableMapOf<TextView, Float>()
+    private val backgroundViews = mutableMapOf<View, Pair<IntArray, Float>>()
+
+    private val canvasBackground = Color.rgb(7, 12, 27)
+    private val white = Color.rgb(239, 244, 255)
+    private val muted = Color.rgb(157, 174, 204)
+    private val blue = Color.rgb(64, 145, 255)
+    private val green = Color.rgb(68, 220, 166)
+
+    private lateinit var canvas: FrameLayout
+    private lateinit var shizukuStatus: TextView
+    private lateinit var shizukuDot: View
+    private lateinit var shizukuButton: TextView
 
     private val permissionListener =
         Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
@@ -51,295 +62,244 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = background
-        window.navigationBarColor = background
+        window.statusBarColor = canvasBackground
+        window.navigationBarColor = canvasBackground
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(background)
+        canvas = FrameLayout(this).apply {
+            setBackgroundColor(canvasBackground)
         }
 
-        // Left navigation rail
-        val sidebar = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(24), dp(18), dp(20))
-            setBackgroundColor(sidebarColor)
+        buildHub()
+        setContentView(canvas)
+
+        canvas.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            layoutCanvas()
         }
-        root.addView(
-            sidebar,
-            LinearLayout.LayoutParams(dp(218), LinearLayout.LayoutParams.MATCH_PARENT)
-        )
+        canvas.post { layoutCanvas() }
 
-        val brandMark = TextView(this).apply {
-            text = "APX"
-            textSize = 25f
-            setTextColor(white)
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            gravity = Gravity.CENTER
-            background = rounded(blue, 14)
-        }
-        sidebar.addView(brandMark, LinearLayout.LayoutParams(dp(54), dp(48)))
-
-        val brandName = text("APX MOUSE", 17f, white, true)
-        brandName.setPadding(0, dp(15), 0, 0)
-        sidebar.addView(brandName)
-
-        val brandSub = text("GAMING CONTROL", 10f, muted, true)
-        brandSub.setPadding(0, dp(4), 0, dp(30))
-        sidebar.addView(brandSub)
-
-        sidebar.addView(text("WORKSPACE", 10f, muted, true).apply {
-            setPadding(dp(4), 0, 0, dp(10))
-        })
-
-        sidebar.addView(navItem("⌂", "Hub", true))
-        sidebar.addView(navItem("⌘", "Gán phím", false) {
-            startActivity(Intent(this, MappingEditor::class.java))
-        })
-
-        val spacer = View(this)
-        sidebar.addView(spacer, LinearLayout.LayoutParams(1, 0, 1f))
-
-        val sideStatus = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = rounded(panelColor, 14)
-        }
-        sideStatus.addView(text("SYSTEM STATUS", 10f, muted, true))
-        sideStatus.addView(text("APX MOUSE  •  v1.1", 11f, white, true).apply {
-            setPadding(0, dp(7), 0, 0)
-        })
-        sidebar.addView(sideStatus)
-
-        // Main workspace
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            clipToPadding = false
-        }
-        root.addView(
-            scroll,
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-        )
-
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(28), dp(22), dp(28), dp(26))
-        }
-        scroll.addView(content)
-
-        val topBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val headingGroup = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        headingGroup.addView(text("Control Center", 25f, white, true))
-        headingGroup.addView(text("Quản lý kết nối và cấu hình APX MOUSE", 12f, muted).apply {
-            setPadding(0, dp(5), 0, 0)
-        })
-        topBar.addView(headingGroup, LinearLayout.LayoutParams(0, -2, 1f))
-        topBar.addView(text("LANDSCAPE  /  HUB", 10f, blue, true).apply {
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = rounded(Color.rgb(22, 45, 82), 20)
-        })
-        content.addView(topBar)
-
-        val welcome = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(18))
-            background = rounded(Color.rgb(22, 43, 76), 18)
-        }
-        welcome.addView(text("WELCOME TO APX MOUSE", 10f, Color.rgb(147, 197, 253), true))
-        welcome.addView(text("Your setup. Your control.", 22f, white, true).apply {
-            setPadding(0, dp(7), 0, dp(5))
-        })
-        welcome.addView(text("Truy cập nhanh các công cụ điều khiển và thiết lập thiết bị.", 12f, muted))
-        val welcomeParams = LinearLayout.LayoutParams(-1, -2)
-        welcomeParams.topMargin = dp(20)
-        content.addView(welcome, welcomeParams)
-
-        // Connection status card
-        val statusCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(16))
-            background = rounded(panelColor, 16)
-        }
-        val statusHeader = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        statusHeader.addView(text("SHIZUKU CONNECTION", 11f, muted, true), LinearLayout.LayoutParams(0, -2, 1f))
-        statusPill = text("ĐANG KIỂM TRA", 10f, white, true).apply {
-            setPadding(dp(10), dp(6), dp(10), dp(6))
-            background = rounded(Color.rgb(55, 65, 81), 18)
-        }
-        statusHeader.addView(statusPill)
-        statusCard.addView(statusHeader)
-
-        val statusRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(14), 0, dp(8))
-        }
-        statusDot = View(this).apply {
-            background = rounded(green, 20)
-        }
-        statusRow.addView(statusDot, LinearLayout.LayoutParams(dp(10), dp(10)))
-        statusText = text("Đang đọc trạng thái Shizuku...", 13f, white, true).apply {
-            setPadding(dp(10), 0, 0, 0)
-        }
-        statusRow.addView(statusText)
-        statusCard.addView(statusRow)
-        statusCard.addView(text(
-            "Bật Wireless debugging, ghép nối và khởi động Shizuku nếu trạng thái chưa kết nối.",
-            11f, muted
-        ))
-        val statusActions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        statusActions.addView(actionButton("KIỂM TRA LẠI", blue) {
-            updateShizukuStatus()
-        }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        statusActions.addView(View(this), LinearLayout.LayoutParams(dp(10), 1))
-        statusActions.addView(actionButton("CẤP QUYỀN", Color.rgb(37, 99, 235)) {
-            requestShizukuPermission()
-        }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        val actionParams = LinearLayout.LayoutParams(-1, -2)
-        actionParams.topMargin = dp(16)
-        statusCard.addView(statusActions, actionParams)
-
-        val statusParams = LinearLayout.LayoutParams(-1, -2)
-        statusParams.topMargin = dp(16)
-        content.addView(statusCard, statusParams)
-
-        // Feature cards
-        content.addView(text("QUICK ACCESS", 11f, muted, true).apply {
-            setPadding(0, dp(22), 0, dp(10))
-        })
-
-        val cardsRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        cardsRow.addView(featureCard(
-            "01", "Key Mapping", "Mở trình chỉnh sửa và xem trước bố cục gán phím.",
-            "MỞ TRÌNH CHỈNH SỬA"
-        ) {
-            startActivity(Intent(this, MappingEditor::class.java))
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        cardsRow.addView(View(this), LinearLayout.LayoutParams(dp(12), 1))
-        cardsRow.addView(featureCard(
-            "02", "Shizuku Manager", "Mở ứng dụng Shizuku để kiểm tra dịch vụ và kết nối.",
-            "MỞ SHIZUKU"
-        ) {
-            val launch = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
-            if (launch != null) startActivity(launch)
-            else toast("Chưa tìm thấy ứng dụng Shizuku")
-        }, LinearLayout.LayoutParams(0, -1, 1f))
-        content.addView(cardsRow, LinearLayout.LayoutParams(-1, -2))
-
-        content.addView(text("APX MOUSE  •  GAMING CONTROL CENTER", 10f, muted).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, dp(22), 0, 0)
-        })
-
-        setContentView(root)
         Shizuku.addRequestPermissionResultListener(permissionListener)
         Shizuku.addBinderReceivedListener(binderReceivedListener)
         Shizuku.addBinderDeadListener(binderDeadListener)
         updateShizukuStatus()
     }
 
-    private fun navItem(
-        symbol: String,
-        label: String,
-        selected: Boolean,
-        action: (() -> Unit)? = null
-    ): TextView {
-        return TextView(this).apply {
-            text = "$symbol    $label"
-            textSize = 13f
-            setTextColor(if (selected) white else muted)
-            typeface = Typeface.create("sans-serif", if (selected) Typeface.BOLD else Typeface.NORMAL)
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(13), 0, dp(10), 0)
-            background = rounded(
-                if (selected) Color.rgb(28, 58, 102) else Color.TRANSPARENT,
-                11
-            )
-            val params = LinearLayout.LayoutParams(-1, dp(44))
-            params.bottomMargin = dp(7)
-            layoutParams = params
-            isClickable = action != null
-            isFocusable = action != null
-            setOnClickListener { action?.invoke() }
+    private fun buildHub() {
+        // Full-screen background and three game panels from the Canva Hub composition.
+        addPanel(0f, 0f, 1920f, 1080f, intArrayOf(
+            Color.rgb(7, 12, 27), Color.rgb(12, 24, 48), Color.rgb(5, 10, 24)
+        ), 0f)
+
+        // Header
+        addText("APX MOUSE", 53f, 49f, 360f, 64f, 39f, white, true)
+        addText("GAMING SPACE", 57f, 111f, 260f, 28f, 15f, muted, true)
+
+        addPanel(1302f, 45f, 299f, 91f, intArrayOf(
+            Color.rgb(22, 47, 83), Color.rgb(15, 30, 58)
+        ), 18f)
+        addText("+", 1334f, 62f, 52f, 54f, 34f, blue, true, Gravity.CENTER)
+        val addApp = addText("Thêm app", 1409f, 68f, 177f, 35f, 22f, white, true)
+        addClick(addApp) { toast("Mục Thêm app chưa được tích hợp") }
+
+        addPanel(1599f, 45f, 253f, 91f, intArrayOf(
+            Color.rgb(22, 47, 83), Color.rgb(15, 30, 58)
+        ), 18f)
+        addText("⚙", 1630f, 62f, 50f, 54f, 29f, blue, true, Gravity.CENTER)
+        val settings = addText("Cài đặt", 1707f, 68f, 140f, 35f, 22f, white, true)
+        addClick(settings) { toast("Mục Cài đặt chưa được tích hợp") }
+
+        // Left game tile — NFS No Limits
+        addPanel(45f, 202f, 458f, 519f, intArrayOf(
+            Color.rgb(18, 38, 69), Color.rgb(8, 17, 36), Color.rgb(17, 44, 76)
+        ), 24f)
+        addPanel(67f, 225f, 414f, 270f, intArrayOf(
+            Color.rgb(31, 86, 133), Color.rgb(12, 29, 58), Color.rgb(8, 17, 35)
+        ), 18f)
+        addText("NFS", 103f, 292f, 320f, 108f, 76f, white, true, Gravity.CENTER)
+        addText("NO LIMITS", 116f, 382f, 290f, 42f, 23f, Color.rgb(154, 207, 255), true, Gravity.CENTER)
+        addText("NFS No Limits", 222f, 569f, 250f, 42f, 27f, white, true)
+        addPanel(246f, 612f, 118f, 38f, intArrayOf(
+            Color.rgb(16, 112, 86), Color.rgb(12, 78, 70)
+        ), 18f)
+        addText("Sẵn sàng", 255f, 621f, 105f, 28f, 18f, Color.rgb(180, 255, 226), true)
+        addPanel(67f, 539f, 139f, 137f, intArrayOf(
+            Color.rgb(18, 65, 105), Color.rgb(11, 26, 51)
+        ), 18f)
+        addText("N", 83f, 550f, 106f, 104f, 78f, white, true, Gravity.CENTER)
+        addText("+", 205f, 607f, 46f, 46f, 28f, blue, true, Gravity.CENTER)
+
+        // Center featured game — Shadow Ronin
+        addPanel(434f, 89f, 1029f, 766f, intArrayOf(
+            Color.rgb(17, 48, 78), Color.rgb(10, 23, 46), Color.rgb(6, 13, 29)
+        ), 26f)
+        addPanel(457f, 112f, 983f, 720f, intArrayOf(
+            Color.rgb(31, 83, 119), Color.rgb(15, 42, 70), Color.rgb(8, 17, 36)
+        ), 20f)
+        addText("影", 610f, 360f, 230f, 230f, 142f, Color.rgb(210, 229, 255), true, Gravity.CENTER)
+        addPanel(790f, 220f, 3f, 400f, intArrayOf(
+            Color.rgb(55, 145, 220), Color.rgb(55, 145, 220)
+        ), 2f)
+        addText("SHADOW", 812f, 368f, 400f, 52f, 26f, Color.rgb(160, 210, 255), true)
+        addText("Shadow Ronin", 804f, 449f, 420f, 62f, 42f, white, true)
+        addPanel(839f, 512f, 150f, 43f, intArrayOf(
+            Color.rgb(15, 111, 87), Color.rgb(10, 77, 69)
+        ), 20f)
+        addText("Sẵn sàng", 849f, 518f, 135f, 35f, 19f, Color.rgb(182, 255, 226), true)
+        val openMapping = addText("MỞ  ›", 900f, 610f, 165f, 58f, 24f, white, true, Gravity.CENTER)
+        addPanel(890f, 607f, 245f, 60f, intArrayOf(
+            Color.rgb(44, 126, 224), Color.rgb(25, 75, 145)
+        ), 18f)
+        // Keep the action label above its button surface.
+        canvas.removeView(openMapping)
+        val openButton = addText("MỞ  ›", 890f, 607f, 245f, 60f, 24f, white, true, Gravity.CENTER)
+        addClick(openButton) {
+            startActivity(Intent(this, MappingEditor::class.java))
+        }
+
+        // Right game tile — Starfall Legion
+        addPanel(1394f, 202f, 481f, 519f, intArrayOf(
+            Color.rgb(28, 39, 83), Color.rgb(11, 17, 43), Color.rgb(9, 16, 35)
+        ), 24f)
+        addPanel(1417f, 225f, 435f, 270f, intArrayOf(
+            Color.rgb(51, 77, 143), Color.rgb(23, 34, 76), Color.rgb(8, 17, 37)
+        ), 18f)
+        addText("✦", 1470f, 268f, 320f, 160f, 112f, Color.rgb(193, 219, 255), true, Gravity.CENTER)
+        addText("STARFALL", 1465f, 416f, 340f, 42f, 24f, Color.rgb(175, 206, 255), true, Gravity.CENTER)
+        addText("Starfall Legion", 1553f, 569f, 290f, 42f, 27f, white, true)
+        addPanel(1567f, 612f, 120f, 38f, intArrayOf(
+            Color.rgb(16, 112, 86), Color.rgb(12, 78, 70)
+        ), 18f)
+        addText("Sẵn sàng", 1582f, 621f, 108f, 28f, 18f, Color.rgb(180, 255, 226), true)
+        addPanel(1417f, 539f, 115f, 137f, intArrayOf(
+            Color.rgb(45, 75, 135), Color.rgb(16, 27, 57)
+        ), 18f)
+        addText("✦", 1425f, 553f, 98f, 104f, 76f, white, true, Gravity.CENTER)
+
+        // System permissions / Shizuku card
+        addPanel(1279f, 787f, 596f, 271f, intArrayOf(
+            Color.rgb(18, 35, 65), Color.rgb(9, 19, 40)
+        ), 22f)
+        addText("QUYỀN HỆ THỐNG", 1403f, 828f, 360f, 42f, 25f, white, true)
+        shizukuDot = View(this).apply {
+            background = rounded(Color.rgb(248, 113, 113), 20f)
+        }
+        addAt(shizukuDot, 1400f, 878f, 15f, 15f)
+        shizukuStatus = addText("Chưa kết nối", 1435f, 876f, 280f, 34f, 19f, Color.rgb(255, 177, 177), true)
+
+        addPanel(1302f, 944f, 299f, 91f, intArrayOf(
+            Color.rgb(26, 106, 130), Color.rgb(16, 62, 91)
+        ), 18f)
+        shizukuButton = addText("Kết nối Shizuku", 1358f, 972f, 245f, 40f, 21f, white, true, Gravity.CENTER)
+        addClick(shizukuButton) { requestShizukuPermission() }
+
+        addPanel(1599f, 966f, 253f, 70f, intArrayOf(
+            Color.rgb(43, 58, 89), Color.rgb(20, 31, 55)
+        ), 18f)
+        val rootButton = addText("Dùng Root", 1669f, 972f, 160f, 40f, 20f, muted, true, Gravity.CENTER)
+        addClick(rootButton) { toast("Chế độ Root chưa được tích hợp") }
+
+        // Small mapping shortcut keeps the existing editor reachable without changing its logic.
+        val mappingShortcut = addText("GÁN PHÍM", 55f, 1000f, 210f, 42f, 18f, muted, true)
+        addClick(mappingShortcut) {
+            startActivity(Intent(this, MappingEditor::class.java))
         }
     }
 
-    private fun featureCard(
-        number: String,
-        title: String,
-        description: String,
-        buttonLabel: String,
-        action: () -> Unit
-    ): LinearLayout {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(15), dp(16), dp(15))
-            background = rounded(panelColor, 16)
-        }
-        card.addView(text(number, 11f, blue, true))
-        card.addView(text(title, 17f, white, true).apply {
-            setPadding(0, dp(8), 0, dp(6))
-        })
-        card.addView(text(description, 11f, muted))
-        val button = actionButton(buttonLabel, Color.rgb(35, 70, 120), action)
-        val params = LinearLayout.LayoutParams(-1, dp(40))
-        params.topMargin = dp(14)
-        card.addView(button, params)
-        return card
+    private fun addPanel(
+        x: Float,
+        y: Float,
+        width: Float,
+        height: Float,
+        colors: IntArray,
+        radius: Float
+    ): View {
+        val view = View(this)
+        backgroundViews[view] = Pair(colors, radius)
+        view.background = gradient(colors, radius)
+        addAt(view, x, y, width, height)
+        return view
     }
 
-    private fun actionButton(label: String, color: Int, action: () -> Unit): TextView {
-        return TextView(this).apply {
-            text = label
-            textSize = 10f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(white)
-            gravity = Gravity.CENTER
-            setPadding(dp(10), 0, dp(10), 0)
-            background = rounded(color, 10)
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { action() }
-        }
-    }
-
-    private fun text(
+    private fun addText(
         value: String,
+        x: Float,
+        y: Float,
+        width: Float,
+        height: Float,
         size: Float,
         color: Int,
-        bold: Boolean = false
+        bold: Boolean = false,
+        gravity: Int = Gravity.CENTER_VERTICAL
     ): TextView {
-        return TextView(this).apply {
+        val view = TextView(this).apply {
             text = value
-            textSize = size
             setTextColor(color)
-            if (bold) typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            gravity = Gravity.CENTER_VERTICAL
+            this.gravity = gravity
+            includeFontPadding = false
+            maxLines = 1
+            textSize = size
+            typeface = Typeface.create("sans-serif", if (bold) Typeface.BOLD else Typeface.NORMAL)
+            setPadding(0, 0, 0, 0)
+            isClickable = false
+        }
+        textSizes[view] = size
+        addAt(view, x, y, width, height)
+        return view
+    }
+
+    private fun addAt(view: View, x: Float, y: Float, width: Float, height: Float) {
+        placements.add(Placement(view, x, y, width, height))
+        canvas.addView(view, FrameLayout.LayoutParams(1, 1))
+    }
+
+    private fun addClick(view: View, action: () -> Unit) {
+        view.isClickable = true
+        view.isFocusable = true
+        view.setOnClickListener { action() }
+    }
+
+    private fun layoutCanvas() {
+        val width = canvas.width.toFloat()
+        val height = canvas.height.toFloat()
+        if (width <= 0f || height <= 0f) return
+
+        val scale = min(width / 1920f, height / 1080f)
+        val offsetX = (width - 1920f * scale) / 2f
+        val offsetY = (height - 1080f * scale) / 2f
+
+        placements.forEach { item ->
+            val params = FrameLayout.LayoutParams(
+                (item.width * scale).toInt().coerceAtLeast(1),
+                (item.height * scale).toInt().coerceAtLeast(1)
+            )
+            params.leftMargin = (offsetX + item.x * scale).toInt()
+            params.topMargin = (offsetY + item.y * scale).toInt()
+            item.view.layoutParams = params
+            if (item.view is TextView) {
+                textSizes[item.view]?.let {
+                    item.view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, it * scale)
+                }
+            }
+            backgroundViews[item.view]?.let { (colors, radius) ->
+                item.view.background = gradient(colors, radius * scale)
+            }
         }
     }
 
-    private fun rounded(color: Int, radius: Int): GradientDrawable {
+    private fun gradient(colors: IntArray, radius: Float): GradientDrawable {
+        return GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            colors
+        ).apply {
+            cornerRadius = radius
+        }
+    }
+
+    private fun rounded(color: Int, radius: Float): GradientDrawable {
         return GradientDrawable().apply {
             setColor(color)
-            cornerRadius = dp(radius).toFloat()
+            cornerRadius = radius
         }
     }
-
-    private fun dp(value: Int): Int =
-        (value * resources.displayMetrics.density).toInt()
 
     override fun onResume() {
         super.onResume()
@@ -355,7 +315,7 @@ class MainActivity : Activity() {
 
     private fun requestShizukuPermission() {
         if (!Shizuku.pingBinder()) {
-            toast("Shizuku chưa chạy. Hãy bật Wireless debugging và khởi động Shizuku trước.")
+            toast("Shizuku chưa chạy. Hãy khởi động Shizuku trước.")
             updateShizukuStatus()
             return
         }
@@ -364,36 +324,35 @@ class MainActivity : Activity() {
             Shizuku.isPreV11() -> toast("Phiên bản Shizuku quá cũ. Hãy cập nhật Shizuku.")
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED ->
                 toast("APX Mouse đã có quyền Shizuku")
-            Shizuku.shouldShowRequestPermissionRationale() ->
-                Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
             else -> Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
         }
     }
 
     private fun updateShizukuStatus() {
-        if (!::statusText.isInitialized) return
+        if (!::shizukuStatus.isInitialized) return
+
         val running = Shizuku.pingBinder()
         val granted = running &&
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
 
         when {
             !running -> {
-                statusPill.text = "CHƯA KẾT NỐI"
-                statusPill.background = rounded(Color.rgb(127, 50, 55), 18)
-                statusDot.background = rounded(Color.rgb(248, 113, 113), 20)
-                statusText.text = "Shizuku chưa kết nối"
+                shizukuStatus.text = "Chưa kết nối"
+                shizukuStatus.setTextColor(Color.rgb(255, 177, 177))
+                shizukuDot.background = rounded(Color.rgb(248, 113, 113), 20f)
+                shizukuButton.text = "Kết nối Shizuku"
             }
             granted -> {
-                statusPill.text = "ĐÃ CẤP QUYỀN"
-                statusPill.background = rounded(Color.rgb(18, 95, 73), 18)
-                statusDot.background = rounded(green, 20)
-                statusText.text = "Đã kết nối và được cấp quyền Shizuku"
+                shizukuStatus.text = "Đã kết nối và cấp quyền"
+                shizukuStatus.setTextColor(green)
+                shizukuDot.background = rounded(green, 20f)
+                shizukuButton.text = "Đã kết nối"
             }
             else -> {
-                statusPill.text = "CHỜ CẤP QUYỀN"
-                statusPill.background = rounded(Color.rgb(117, 83, 31), 18)
-                statusDot.background = rounded(Color.rgb(251, 191, 36), 20)
-                statusText.text = "Shizuku đang chạy, APX Mouse chưa được cấp quyền"
+                shizukuStatus.text = "Đang chạy · Chưa cấp quyền"
+                shizukuStatus.setTextColor(Color.rgb(255, 211, 128))
+                shizukuDot.background = rounded(Color.rgb(251, 191, 36), 20f)
+                shizukuButton.text = "Cấp quyền Shizuku"
             }
         }
     }
