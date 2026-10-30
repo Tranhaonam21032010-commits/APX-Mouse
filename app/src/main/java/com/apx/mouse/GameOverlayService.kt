@@ -115,7 +115,7 @@ class GameOverlayService : Service() {
         }
 
         val bubble = FrameLayout(this).apply {
-            background = circle(Color.rgb(17, 35, 62), dp(28).toFloat(), Color.rgb(64, 145, 255), dp(2))
+            background = circle(Color.rgb(17, 35, 62), dp(28).toFloat(), Color.rgb(64, 145, 255), dp(2).toFloat())
             elevation = dp(8).toFloat()
             contentDescription = "Mở menu APX MOUSE"
             isClickable = true
