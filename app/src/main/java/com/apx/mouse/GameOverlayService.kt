@@ -162,12 +162,31 @@ class GameOverlayService : Service() {
     }
 
     private fun setFanOpen(open: Boolean) {
+        if (fanOpen == open) return
         fanOpen = open
         val root = overlayRoot ?: return
         // The three fan controls are the first three children; the game avatar is last.
         for (index in 0 until minOf(3, root.childCount)) {
-            root.getChildAt(index).visibility = if (open) View.VISIBLE else View.GONE
-            root.getChildAt(index).alpha = if (open) 1f else 0f
+            val item = root.getChildAt(index)
+            item.animate().cancel()
+            if (open) {
+                item.visibility = View.VISIBLE
+                item.alpha = 0f
+                item.scaleX = 0.25f
+                item.scaleY = 0.25f
+                item.animate()
+                    .alpha(1f).scaleX(1f).scaleY(1f)
+                    .setStartDelay(index * 35L)
+                    .setDuration(180L)
+                    .start()
+            } else {
+                item.animate()
+                    .alpha(0f).scaleX(0.25f).scaleY(0.25f)
+                    .setStartDelay(0L)
+                    .setDuration(120L)
+                    .withEndAction { item.visibility = View.GONE }
+                    .start()
+            }
         }
     }
 
