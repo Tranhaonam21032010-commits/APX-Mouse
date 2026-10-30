@@ -98,7 +98,7 @@ class GameOverlayService : Service() {
         layoutParams = params
 
         val fanItems = listOf(
-            createAction("⌨", "Gán phím") { openMappingEditor() },
+            createAction("⌨", "Chỉnh sửa thao tác") { openMappingEditor() },
             createAction("–", "Ẩn overlay") {
                 manuallyHidden = true
                 setFanOpen(false)
@@ -199,7 +199,9 @@ class GameOverlayService : Service() {
 
     private fun openMappingEditor() {
         setFanOpen(false)
-        startActivity(Intent(this, MappingEditor::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        startActivity(Intent(this, MappingEditor::class.java)
+            .putExtra(MappingEditor.EXTRA_GAME_PACKAGE, gamePackage)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     private fun currentForegroundPackage(): String? {
