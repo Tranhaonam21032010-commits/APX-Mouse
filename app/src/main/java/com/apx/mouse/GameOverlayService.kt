@@ -23,9 +23,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.text.InputType
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
@@ -52,6 +54,7 @@ class GameOverlayService : Service() {
     private var outsideGameSince: Long? = null
     private var statsView: TextView? = null
     private var scaleRoot: FrameLayout? = null
+    private var mouseTweakRoot: FrameLayout? = null
     private var scaleCountdown: TextView? = null
     private var scalePreviewPending = false
     private var scaleWidth = 1600
@@ -76,6 +79,7 @@ class GameOverlayService : Service() {
             if (inGame) outsideGameSince = null
             if (!inGame && scalePreviewPending) closeDisplayScalePanel(restore = true)
             scaleRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
+            mouseTweakRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
             overlayRoot?.visibility = if (inGame && isStatsEnabled()) View.VISIBLE else View.GONE
             bubbleRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
             if (!inGame) setFanOpen(false)
@@ -469,9 +473,141 @@ class GameOverlayService : Service() {
 
     private fun openMouseTweak() {
         setFanOpen(false)
-        startActivity(Intent(this, MouseTweakActivity::class.java)
-            .putExtra(MouseTweakActivity.EXTRA_GAME_PACKAGE, gamePackage)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        mouseTweakRoot?.let { closeMouseTweak(); return }
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+        val prefs = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+        val keyX = "mouse_x_factor_$gamePackage"
+        val keyY = "mouse_y_factor_$gamePackage"
+        val keyMode = "mouse_lock_mode_$gamePackage"
+        val keyCursor = "mouse_cursor_visible_$gamePackage"
+        val keyToggle = "mouse_cursor_toggle_key_$gamePackage"
+        val valueX = prefs.getFloat(keyX, 1.0f)
+        val valueY = prefs.getFloat(keyY, 1.0f)
+        val cursorVisible = prefs.getBoolean(keyCursor, true)
+        val toggleCode = prefs.getInt(keyToggle, KeyEvent.KEYCODE_UNKNOWN)
+        var selectedMode = prefs.getString(keyMode, "fps") ?: "fps"
+        var bindingToggleKey = false
+
+        fun label(value: String, size: Float, color: Int = Color.WHITE, bold: Boolean = false) =
+            TextView(this).apply {
+                text = value; textSize = size; setTextColor(color); gravity = Gravity.CENTER_VERTICAL
+                if (bold) typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+        fun field(value: Float, hint: String) = EditText(this).apply {
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(value.toString()); this.hint = hint; textSize = 16f
+            setTextColor(Color.WHITE); setHintTextColor(Color.GRAY)
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(18, 39, 66)); cornerRadius = dp(8).toFloat()
+                setStroke(dp(1), Color.rgb(64, 145, 255))
+            }
+        }
+        fun actionButton(text: String, onClick: () -> Unit) = TextView(this).apply {
+            this.text = text; textSize = 12f; gravity = Gravity.CENTER
+            setTextColor(Color.WHITE); setPadding(dp(10), dp(8), dp(10), dp(8))
+            background = GradientDrawable().apply { setColor(Color.rgb(25, 70, 116)); cornerRadius = dp(8).toFloat() }
+            isClickable = true; setOnClickListener { onClick() }
+        }
+
+        val root = object : FrameLayout(this) {
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                if (bindingToggleKey && event.action == KeyEvent.ACTION_DOWN &&
+                    event.keyCode != KeyEvent.KEYCODE_BACK) {
+                    prefs.edit().putInt(keyToggle, event.keyCode).apply()
+                    bindingToggleKey = false
+                    return true
+                }
+                if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                    closeMouseTweak(); return true
+                }
+                return super.dispatchKeyEvent(event)
+            }
+        }.apply {
+            isFocusable = true; isFocusableInTouchMode = true
+            background = GradientDrawable().apply {
+                setColor(Color.argb(248, 5, 15, 31)); cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), Color.rgb(64, 145, 255))
+            }
+            elevation = dp(14).toFloat(); setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        panel.addView(label("APX MOUSE · MOUSE TWEAK", 17f, Color.WHITE, true), LinearLayout.LayoutParams(-1, dp(30)))
+        panel.addView(label("Game: $gamePackage", 10f, Color.LTGRAY), LinearLayout.LayoutParams(-1, dp(22)))
+
+        val xRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        xRow.addView(label("Sensitivity X", 13f, Color.WHITE, true), LinearLayout.LayoutParams(0, dp(42), 1f))
+        val xInput = field(valueX, "1.0")
+        xRow.addView(xInput, LinearLayout.LayoutParams(dp(112), dp(42)))
+        panel.addView(xRow)
+        val yRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        yRow.addView(label("Sensitivity Y", 13f, Color.WHITE, true), LinearLayout.LayoutParams(0, dp(42), 1f))
+        val yInput = field(valueY, "1.0")
+        yRow.addView(yInput, LinearLayout.LayoutParams(dp(112), dp(42)))
+        panel.addView(yRow)
+
+        panel.addView(label("Mouse Lock Mode", 13f, Color.rgb(100, 190, 255), true), LinearLayout.LayoutParams(-1, dp(30)))
+        val modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        modeRow.addView(actionButton("FPS · ẨN CON TRỎ") {
+            selectedMode = "fps"; prefs.edit().putString(keyMode, selectedMode).apply()
+        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(0, 0, dp(4), 0) })
+        modeRow.addView(actionButton("GIỚI HẠN CON TRỎ") {
+            selectedMode = "boundary"; prefs.edit().putString(keyMode, selectedMode).apply()
+        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(dp(4), 0, 0, 0) })
+        panel.addView(modeRow)
+
+        val cursorStatus = label("Con trỏ: " + if (cursorVisible) "ĐANG HIỆN" else "ĐANG ẨN", 12f, Color.WHITE)
+        panel.addView(cursorStatus, LinearLayout.LayoutParams(-1, dp(30)))
+        panel.addView(actionButton("GÁN PHÍM BẬT / TẮT CON TRỎ") {
+            bindingToggleKey = true; cursorStatus.text = "Nhấn phím muốn gán…"; root.requestFocus()
+        }, LinearLayout.LayoutParams(-1, dp(40)))
+        val savedKey = if (toggleCode == KeyEvent.KEYCODE_UNKNOWN) "Chưa gán" else KeyEvent.keyCodeToString(toggleCode)
+        panel.addView(label("Phím đã chọn: $savedKey", 10f, Color.LTGRAY), LinearLayout.LayoutParams(-1, dp(24)))
+        panel.addView(label("Cấu hình được lưu theo game. Khóa chuột và phím tắt toàn hệ thống chưa hoạt động cho đến khi có Input Engine tương thích.", 10f, Color.rgb(255, 205, 130)),
+            LinearLayout.LayoutParams(-1, dp(48)))
+
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
+        buttons.addView(actionButton("ĐÓNG") { closeMouseTweak() }, LinearLayout.LayoutParams(-2, dp(40)).apply { setMargins(dp(4), 0, dp(4), 0) })
+        buttons.addView(actionButton("RESET X/Y") { xInput.setText("1.0"); yInput.setText("1.0") },
+            LinearLayout.LayoutParams(-2, dp(40)).apply { setMargins(dp(4), 0, dp(4), 0) })
+        buttons.addView(actionButton("LƯU") {
+            val xValue = xInput.text.toString().toFloatOrNull()
+            val yValue = yInput.text.toString().toFloatOrNull()
+            if (xValue == null || yValue == null || !xValue.isFinite() || !yValue.isFinite() || xValue <= 0f || yValue <= 0f) {
+                android.widget.Toast.makeText(this@GameOverlayService, "X/Y phải là số lớn hơn 0", android.widget.Toast.LENGTH_SHORT).show()
+                return@actionButton
+            }
+            prefs.edit().putFloat(keyX, xValue).putFloat(keyY, yValue).putString(keyMode, selectedMode).apply()
+            android.widget.Toast.makeText(this@GameOverlayService, "Đã lưu X=$xValue · Y=$yValue", android.widget.Toast.LENGTH_SHORT).show()
+            closeMouseTweak()
+        }, LinearLayout.LayoutParams(-2, dp(40)).apply { setMargins(dp(4), 0, 0, 0) })
+        panel.addView(buttons)
+        root.addView(panel, FrameLayout.LayoutParams(-1, -2))
+
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        val params = WindowManager.LayoutParams(dp(360), -2, type,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(82)
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        }
+        mouseTweakRoot = root
+        try {
+            windowManager.addView(root, params); root.requestFocus()
+        } catch (e: Exception) {
+            mouseTweakRoot = null
+            android.widget.Toast.makeText(this@GameOverlayService, "Không thể mở Mouse Tweak: " + e.message, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun closeMouseTweak() {
+        mouseTweakRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
+        mouseTweakRoot = null
+        bubbleRoot?.visibility = View.VISIBLE
     }
 
     private data class EditorPoint(var x: Float, var y: Float, var keyCode: Int = KeyEvent.KEYCODE_UNKNOWN)
@@ -847,6 +983,7 @@ class GameOverlayService : Service() {
         handler.removeCallbacksAndMessages(null)
         pingExecutor.shutdownNow()
         closeDisplayScalePanel(restore = true)
+        closeMouseTweak()
         overlayRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         bubbleRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         actionOverlays.forEach { try { windowManager.removeView(it) } catch (_: Exception) { } }
