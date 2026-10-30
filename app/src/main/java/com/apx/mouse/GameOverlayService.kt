@@ -212,9 +212,9 @@ class GameOverlayService : Service() {
     private fun markerLabel(index: Int, keyCode: Int): String {
         if (keyCode == android.view.KeyEvent.KEYCODE_UNKNOWN) return "${index + 1}"
         return when (keyCode) {
-            android.view.KeyEvent.KEYCODE_BUTTON_PRIMARY -> "LMB"
-            android.view.KeyEvent.KEYCODE_BUTTON_SECONDARY -> "RMB"
-            android.view.KeyEvent.KEYCODE_BUTTON_MIDDLE -> "MMB"
+            android.view.KeyEvent.KEYCODE_BUTTON_1 -> "LMB"
+            android.view.KeyEvent.KEYCODE_BUTTON_2 -> "RMB"
+            android.view.KeyEvent.KEYCODE_BUTTON_3 -> "MMB"
             else -> android.view.KeyEvent.keyCodeToString(keyCode)
                 .removePrefix("KEYCODE_").take(5)
         }
