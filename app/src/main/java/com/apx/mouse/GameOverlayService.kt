@@ -333,7 +333,7 @@ class GameOverlayService : Service() {
                 textSize = 10f
                 gravity = Gravity.CENTER
                 setTextColor(Color.WHITE)
-                background = rounded(Color.rgb(24, 48, 78), dp(8).toFloat())
+                background = GradientDrawable().apply { setColor(Color.rgb(24, 48, 78)); cornerRadius = dp(8).toFloat() }
                 isClickable = true
                 setOnClickListener {
                     scaleWidth = choice.second
@@ -355,7 +355,7 @@ class GameOverlayService : Service() {
             setTextColor(Color.WHITE)
             background = rounded(Color.rgb(24, 48, 78), dp(8).toFloat())
             isClickable = true
-            setOnClickListener(action)
+            setOnClickListener { action() }
         }
         dpiRow.addView(smallButton("−") {
             scaleDpi = (scaleDpi - 20).coerceAtLeast(100)
@@ -376,7 +376,7 @@ class GameOverlayService : Service() {
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            background = rounded(Color.rgb(20, 70, 120), dp(8).toFloat())
+            background = GradientDrawable().apply { setColor(Color.rgb(20, 70, 120)); cornerRadius = dp(8).toFloat() }
             isClickable = true
             setOnClickListener(action)
         }
