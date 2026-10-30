@@ -1,18 +1,38 @@
-
 package com.apx.mouse
 
 import android.app.Activity
-import android.os.Bundle
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Bundle
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import rikka.shizuku.Shizuku
 
 class MainActivity : Activity() {
 
     private val bg = Color.rgb(15, 23, 42)
     private val blue = Color.rgb(37, 99, 235)
-    private val white = Color.WHITE
+    private lateinit var statusText: TextView
+
+    private val permissionListener =
+        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+            if (requestCode == SHIZUKU_REQUEST_CODE) {
+                updateShizukuStatus()
+                toast(if (grantResult == PackageManager.PERMISSION_GRANTED)
+                    "Đã cấp quyền Shizuku" else "Quyền Shizuku chưa được cấp")
+            }
+        }
+
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        updateShizukuStatus()
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        updateShizukuStatus()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -23,78 +43,107 @@ class MainActivity : Activity() {
             setBackgroundColor(bg)
         }
 
-        fun addText(
-            text: String,
-            size: Float,
-            color: Int,
-            bold: Boolean = false
-        ) {
-            val view = TextView(this).apply {
+        fun addText(text: String, size: Float, color: Int, bold: Boolean = false) {
+            root.addView(TextView(this).apply {
                 this.text = text
                 textSize = size
                 setTextColor(color)
                 gravity = Gravity.CENTER_VERTICAL
                 if (bold) setTypeface(null, 1)
                 setPadding(12, 15, 12, 15)
-            }
-            root.addView(view)
+            })
         }
 
-        addText("APX MOUSE", 28f, white, true)
-        addText("GAMING CONTROL CENTER", 12f, blue)
-        addText("Chào mừng đến với APX MOUSE", 18f, white)
-
         fun addButton(title: String, action: () -> Unit) {
-            val button = TextView(this).apply {
+            root.addView(TextView(this).apply {
                 text = title
                 textSize = 16f
-                setTextColor(white)
+                setTextColor(Color.WHITE)
                 gravity = Gravity.CENTER
                 setBackgroundColor(blue)
                 setPadding(15, 20, 15, 20)
                 setOnClickListener { action() }
-            }
-
-            val params = LinearLayout.LayoutParams(
+            }, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, 10, 0, 10)
-            }
-
-            root.addView(button, params)
+            ).apply { setMargins(0, 10, 0, 10) })
         }
 
-        addButton("🎮  Quản lý game") {
-            showMessage("Game Library")
+        addText("APX MOUSE", 28f, Color.WHITE, true)
+        addText("GAMING CONTROL CENTER", 12f, blue)
+        addText("Kết nối Shizuku qua Wireless debugging", 17f, Color.WHITE, true)
+
+        statusText = TextView(this).apply {
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setPadding(12, 14, 12, 14)
         }
+        root.addView(statusText)
 
-addButton("⌨️ Chỉnh sửa gán phím") {
-    startActivity(
-        android.content.Intent(
-            this@MainActivity,
-            MappingEditor::class.java
-        )
-    )
-}
-
-        
-        addButton("🖱️  Cài đặt chuột") {
-            showMessage("Mouse Settings đang phát triển")
+        addButton("KIỂM TRA SHIZUKU") { updateShizukuStatus() }
+        addButton("YÊU CẦU CẤP QUYỀN") { requestShizukuPermission() }
+        addButton("MỞ SHIZUKU") {
+            val launch = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+            if (launch != null) startActivity(launch)
+            else toast("Chưa tìm thấy ứng dụng Shizuku")
         }
-
-        addButton("⚙️  Cài đặt") {
-            showMessage("Settings")
+        addButton("CHỈNH SỬA GÁN PHÍM") {
+            startActivity(Intent(this, MappingEditor::class.java))
         }
 
         setContentView(root)
+        Shizuku.addRequestPermissionResultListener(permissionListener)
+        Shizuku.addBinderReceivedListener(binderReceivedListener)
+        Shizuku.addBinderDeadListener(binderDeadListener)
+        updateShizukuStatus()
     }
 
-    private fun showMessage(message: String) {
-        android.widget.Toast.makeText(
-            this,
-            message,
-            android.widget.Toast.LENGTH_SHORT
-        ).show()
+    override fun onResume() {
+        super.onResume()
+        updateShizukuStatus()
+    }
+
+    override fun onDestroy() {
+        Shizuku.removeRequestPermissionResultListener(permissionListener)
+        Shizuku.removeBinderReceivedListener(binderReceivedListener)
+        Shizuku.removeBinderDeadListener(binderDeadListener)
+        super.onDestroy()
+    }
+
+    private fun requestShizukuPermission() {
+        if (!Shizuku.pingBinder()) {
+            toast("Shizuku chưa chạy. Hãy bật Wireless debugging và khởi động Shizuku trước.")
+            updateShizukuStatus()
+            return
+        }
+
+        when {
+            Shizuku.isPreV11() -> toast("Phiên bản Shizuku quá cũ. Hãy cập nhật Shizuku.")
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED ->
+                toast("APX Mouse đã có quyền Shizuku")
+            Shizuku.shouldShowRequestPermissionRationale() ->
+                Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
+            else -> Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
+        }
+    }
+
+    private fun updateShizukuStatus() {
+        if (!::statusText.isInitialized) return
+        val running = Shizuku.pingBinder()
+        val granted = running &&
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        statusText.text = when {
+            !running -> "Trạng thái: Shizuku chưa kết nối\nBật Wireless debugging, ghép nối và Start trong Shizuku."
+            granted -> "Trạng thái: Đã kết nối và được cấp quyền Shizuku."
+            else -> "Trạng thái: Shizuku đang chạy, APX Mouse chưa được cấp quyền."
+        }
+    }
+
+    private fun toast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    companion object {
+        private const val SHIZUKU_REQUEST_CODE = 2301
     }
 }
