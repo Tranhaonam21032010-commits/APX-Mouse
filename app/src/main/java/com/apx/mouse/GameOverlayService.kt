@@ -128,7 +128,7 @@ class GameOverlayService : Service() {
             isClickable = true
         }
         val icon = ImageView(this).apply {
-            val appIcon = try { packageManager.getApplicationIcon(gamePackage) }
+            val appIcon = try { packageManager.getApplicationIcon(packageName) }
                 catch (_: Exception) { null }
             if (appIcon != null) setImageDrawable(appIcon)
             else setImageResource(android.R.drawable.sym_def_app_icon)
