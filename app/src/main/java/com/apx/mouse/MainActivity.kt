@@ -70,46 +70,63 @@ class MainActivity : Activity() {
     }
 
     private fun buildHub() {
+        // Hub layout follows Canva page 1 (1920 x 1080).
         addPanel(0f, 0f, 1920f, 1080f,
-            intArrayOf(Color.rgb(7, 12, 27), Color.rgb(12, 24, 48), Color.rgb(5, 10, 24)), 0f)
+            intArrayOf(Color.rgb(5, 9, 22), Color.rgb(10, 20, 42), Color.rgb(4, 8, 19)), 0f)
+
         addText("APX MOUSE", 53f, 49f, 360f, 64f, 39f, white, true)
         addText("GAMING SPACE", 57f, 111f, 260f, 28f, 15f, muted, true)
 
-        addPanel(1302f, 45f, 299f, 91f, intArrayOf(Color.rgb(22, 47, 83), Color.rgb(15, 30, 58)), 18f)
+        // Top actions
+        addPanel(1302f, 45f, 299f, 91f, intArrayOf(Color.rgb(20, 48, 86), Color.rgb(12, 27, 53)), 18f)
         addText("+", 1334f, 62f, 52f, 54f, 34f, blue, true, Gravity.CENTER)
         addClick(addText("Thêm app", 1409f, 68f, 177f, 35f, 22f, white, true)) { showAppPicker() }
-
-        addPanel(1599f, 45f, 253f, 91f, intArrayOf(Color.rgb(22, 47, 83), Color.rgb(15, 30, 58)), 18f)
+        addPanel(1599f, 45f, 253f, 91f, intArrayOf(Color.rgb(20, 48, 86), Color.rgb(12, 27, 53)), 18f)
         addText("⚙", 1630f, 62f, 50f, 54f, 29f, blue, true, Gravity.CENTER)
         addClick(addText("Cài đặt", 1707f, 68f, 140f, 35f, 22f, white, true)) { showSettings() }
 
-        addPanel(45f, 202f, 1830f, 519f,
-            intArrayOf(Color.rgb(18, 38, 69), Color.rgb(8, 17, 36), Color.rgb(12, 27, 51)), 24f)
-        addPanel(70f, 227f, 1780f, 469f,
-            intArrayOf(Color.rgb(15, 31, 57), Color.rgb(9, 19, 39)), 20f)
-        emptyStateViews += addText("+", 820f, 325f, 280f, 150f, 112f, blue, true, Gravity.CENTER)
-        emptyStateViews += addText("CHƯA CÓ ỨNG DỤNG", 650f, 480f, 620f, 54f, 30f, white, true, Gravity.CENTER)
-        emptyStateViews += addText("Chọn “Thêm app” để đưa ứng dụng đã cài vào Game Space",
-            460f, 542f, 1000f, 42f, 20f, muted, false, Gravity.CENTER)
-
-        addPanel(1279f, 787f, 596f, 271f,
-            intArrayOf(Color.rgb(18, 35, 65), Color.rgb(9, 19, 40)), 22f)
-        addText("QUYỀN HỆ THỐNG", 1403f, 828f, 360f, 42f, 25f, white, true)
-        shizukuDot = View(this).apply { background = rounded(Color.rgb(248, 113, 113), 20f) }
-        addAt(shizukuDot, 1400f, 878f, 15f, 15f)
-        shizukuStatus = addText("Chưa kết nối", 1435f, 876f, 350f, 34f, 19f, Color.rgb(255, 177, 177), true)
-
-        addPanel(1302f, 944f, 299f, 91f, intArrayOf(Color.rgb(26, 106, 130), Color.rgb(16, 62, 91)), 18f)
-        shizukuButton = addText("Kết nối Shizuku", 1358f, 972f, 245f, 40f, 21f, white, true, Gravity.CENTER)
-        addClick(shizukuButton) { requestShizukuPermission() }
-
-        addPanel(1599f, 966f, 253f, 70f, intArrayOf(Color.rgb(43, 58, 89), Color.rgb(20, 31, 55)), 18f)
-        addClick(addText("Dùng Root", 1669f, 972f, 160f, 40f, 20f, muted, true, Gravity.CENTER)) {
-            toast("Chế độ Root chưa được tích hợp")
+        // Left navigation / library panel
+        addPanel(45f, 202f, 458f, 519f,
+            intArrayOf(Color.rgb(17, 35, 65), Color.rgb(8, 16, 34)), 24f)
+        addText("GAME SPACE", 88f, 245f, 340f, 42f, 23f, white, true)
+        addText("THƯ VIỆN ỨNG DỤNG", 88f, 307f, 340f, 30f, 15f, muted, true)
+        addText("Ứng dụng đã thêm", 88f, 374f, 300f, 34f, 20f, white, true)
+        addText("Chọn ứng dụng bằng nút", 88f, 425f, 340f, 30f, 17f, muted, false)
+        addText("“Thêm app” ở góc trên.", 88f, 460f, 340f, 30f, 17f, muted, false)
+        addPanel(86f, 548f, 365f, 102f, intArrayOf(Color.rgb(20, 52, 91), Color.rgb(11, 28, 54)), 16f)
+        addText("GÁN PHÍM", 111f, 582f, 300f, 36f, 21f, blue, true)
+        addClick(addText("Mở trình chỉnh sửa", 111f, 618f, 300f, 25f, 15f, muted, false)) {
+            startActivity(Intent(this, MappingEditor::class.java))
         }
 
-        addClick(addText("GÁN PHÍM", 55f, 1000f, 210f, 42f, 18f, muted, true)) {
-            startActivity(Intent(this, MappingEditor::class.java))
+        // Main game stage
+        addPanel(434f, 90f, 1029f, 766f,
+            intArrayOf(Color.rgb(18, 39, 72), Color.rgb(7, 15, 32), Color.rgb(12, 27, 52)), 28f)
+        addText("TRÒ CHƠI CỦA BẠN", 490f, 133f, 620f, 42f, 25f, white, true)
+        addText("Chọn game trong thư viện để mở nhanh", 492f, 180f, 700f, 30f, 17f, muted, false)
+
+        emptyStateViews += addText("+", 805f, 385f, 280f, 130f, 100f, blue, true, Gravity.CENTER)
+        emptyStateViews += addText("CHƯA CÓ ỨNG DỤNG", 650f, 530f, 620f, 48f, 27f, white, true, Gravity.CENTER)
+        emptyStateViews += addText("Nhấn “Thêm app” để bắt đầu tạo Game Space",
+            570f, 584f, 760f, 36f, 18f, muted, false, Gravity.CENTER)
+
+        // System access panel in the lower-right, matching the Canva composition.
+        addPanel(1096f, 832f, 824f, 248f,
+            intArrayOf(Color.rgb(15, 32, 60), Color.rgb(7, 15, 32)), 22f)
+        addText("QUYỀN HỆ THỐNG", 1279f, 858f, 440f, 38f, 24f, white, true)
+        shizukuDot = View(this).apply { background = rounded(Color.rgb(248, 113, 113), 20f) }
+        addAt(shizukuDot, 1282f, 914f, 15f, 15f)
+        shizukuStatus = addText("Chưa kết nối", 1317f, 908f, 420f, 34f, 19f, Color.rgb(255, 177, 177), true)
+
+        addPanel(1279f, 966f, 321f, 92f,
+            intArrayOf(Color.rgb(24, 105, 133), Color.rgb(12, 54, 83)), 18f)
+        shizukuButton = addText("Kết nối Shizuku", 1310f, 991f, 260f, 40f, 20f, white, true, Gravity.CENTER)
+        addClick(shizukuButton) { requestShizukuPermission() }
+
+        addPanel(1622f, 966f, 207f, 92f,
+            intArrayOf(Color.rgb(37, 53, 82), Color.rgb(17, 28, 50)), 18f)
+        addClick(addText("Dùng Root", 1644f, 991f, 164f, 40f, 19f, muted, true, Gravity.CENTER)) {
+            toast("Chế độ Root chưa được tích hợp")
         }
         renderGameSpace()
     }
@@ -164,18 +181,18 @@ class MainActivity : Activity() {
         val packages = selectedPackages.filter { packageManager.getLaunchIntentForPackage(it) != null }.sorted()
         emptyStateViews.forEach { it.visibility = if (packages.isEmpty()) View.VISIBLE else View.GONE }
 
-        packages.take(8).forEachIndexed { index, packageName ->
+        packages.take(6).forEachIndexed { index, packageName ->
             val info = packageManager.getApplicationInfo(packageName, 0)
             val label = packageManager.getApplicationLabel(info).toString()
-            val col = index % 4
-            val row = index / 4
-            val x = 105f + col * 435f
-            val y = 270f + row * 210f
-            addDynamicPanel(x, y, 395f, 175f,
-                intArrayOf(Color.rgb(24, 54, 91), Color.rgb(12, 27, 52)), 20f)
-            val name = addDynamicText(label, x + 24f, y + 30f, 345f, 55f, 24f, white, true)
+            val col = index % 2
+            val row = index / 2
+            val x = 520f + col * 450f
+            val y = 250f + row * 190f
+            addDynamicPanel(x, y, 405f, 154f,
+                intArrayOf(Color.rgb(25, 55, 94), Color.rgb(10, 24, 47)), 20f)
+            val name = addDynamicText(label, x + 24f, y + 28f, 350f, 48f, 23f, white, true)
             addClick(name) { launchSelectedApp(packageName) }
-            val open = addDynamicText("MỞ ỨNG DỤNG", x + 24f, y + 105f, 345f, 35f, 17f, blue, true)
+            val open = addDynamicText("MỞ ỨNG DỤNG", x + 24f, y + 96f, 350f, 30f, 16f, blue, true)
             addClick(open) { launchSelectedApp(packageName) }
             name.setOnLongClickListener {
                 confirmRemoveApp(packageName, label)
@@ -186,9 +203,9 @@ class MainActivity : Activity() {
                 true
             }
         }
-        if (packages.size > 8) {
-            val more = addDynamicText("Còn ${packages.size - 8} ứng dụng · mở Cài đặt để quản lý",
-                110f, 690f, 1200f, 28f, 16f, muted, false)
+        if (packages.size > 6) {
+            val more = addDynamicText("Còn ${packages.size - 6} ứng dụng trong thư viện",
+                520f, 830f, 700f, 28f, 16f, muted, false)
             more.isClickable = false
         }
         layoutCanvas()
