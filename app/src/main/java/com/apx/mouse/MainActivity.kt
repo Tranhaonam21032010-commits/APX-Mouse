@@ -121,15 +121,18 @@ class MainActivity : Activity() {
             return
         }
         val labels = apps.map { it.loadLabel(packageManager).toString() }.toTypedArray()
-        val checked = BooleanArray(apps.size) { apps[it].activityInfo.packageName in selectedPackages }
+        val stagedPackages = selectedPackages.toMutableSet()
+        val checked = BooleanArray(apps.size) { apps[it].activityInfo.packageName in stagedPackages }
         AlertDialog.Builder(this)
             .setTitle("Thêm ứng dụng vào Game Space")
             .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
                 val packageName = apps[which].activityInfo.packageName
-                if (isChecked) selectedPackages.add(packageName) else selectedPackages.remove(packageName)
+                if (isChecked) stagedPackages.add(packageName) else stagedPackages.remove(packageName)
             }
             .setNegativeButton("Hủy", null)
             .setPositiveButton("Lưu") { _, _ ->
+                selectedPackages.clear()
+                selectedPackages.addAll(stagedPackages)
                 prefs.edit().putStringSet(KEY_SELECTED_APPS, selectedPackages.toSet()).apply()
                 renderGameSpace()
                 toast("Đã cập nhật Game Space")
