@@ -13,6 +13,34 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
         Thread { System.exit(0) }.start()
     }
 
+    override fun inputInventory(): String {
+        return runDiagnostic(
+            "id; echo '\\n--- INPUT DEVICES ---'; cat /proc/bus/input/devices; " +
+            "echo '\\n--- /dev/input ---'; ls -l /dev/input 2>&1; " +
+            "echo '\\n--- GETEVENT CAPABILITIES ---'; getevent -pl 2>&1",
+            8
+        )
+    }
+
+    override fun captureInputEvents(seconds: Int): String {
+        val duration = seconds.coerceIn(2, 8)
+        return runDiagnostic("timeout ${duration}s getevent -lt 2>&1", duration + 2)
+    }
+
+    private fun runDiagnostic(command: String, timeoutSeconds: Long): String {
+        return try {
+            val process = ProcessBuilder("sh", "-c", command).redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                return "ERROR: Chẩn đoán vượt quá thời gian cho phép"
+            }
+            output.take(16000).ifBlank { "(Không có dữ liệu trả về)" }
+        } catch (e: Exception) {
+            "ERROR: ${e.message ?: "Không chạy được chẩn đoán"}"
+        }
+    }
+
     override fun execute(command: String): String {
         val normalized = command.trim()
         if (!(normalized == "wm size" || normalized == "wm density" ||
