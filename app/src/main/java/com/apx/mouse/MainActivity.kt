@@ -267,6 +267,7 @@ class MainActivity : Activity() {
         val options = arrayOf(
             "Hiện ứng dụng hệ thống trong danh sách Thêm app",
             "Xóa toàn bộ ứng dụng khỏi Game Space",
+            "Chẩn đoán chuột / bàn phím (Shizuku)",
             "Giới thiệu APX MOUSE · Phiên bản"
         )
         AlertDialog.Builder(this)
@@ -287,7 +288,8 @@ class MainActivity : Activity() {
                             prefs.edit().putStringSet(KEY_SELECTED_APPS, emptySet()).apply()
                             renderGameSpace()
                         }.show()
-                    2 -> {
+                    2 -> startActivity(Intent(this, InputDiagnosticsActivity::class.java))
+                    3 -> {
                         val version = packageManager.getPackageInfo(packageName, 0).versionName ?: "Không rõ"
                         AlertDialog.Builder(this).setTitle("APX MOUSE")
                             .setMessage("Phiên bản $version\nGame Space lưu danh sách ứng dụng trên thiết bị.")
