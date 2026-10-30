@@ -81,64 +81,33 @@ class MainActivity : Activity() {
     }
 
     private fun buildHub() {
-        // Hub layout follows Canva page 1 (1920 x 1080).
-        addPanel(0f, 0f, 1920f, 1080f,
-            intArrayOf(Color.rgb(5, 9, 22), Color.rgb(10, 20, 42), Color.rgb(4, 8, 19)), 0f)
-
-        addText("APX MOUSE", 53f, 49f, 360f, 64f, 39f, white, true)
-        addText("GAMING SPACE", 57f, 111f, 260f, 28f, 15f, muted, true)
-
-        // Top actions
-        addPanel(1302f, 45f, 299f, 91f, intArrayOf(Color.rgb(20, 48, 86), Color.rgb(12, 27, 53)), 18f)
-        addText("+", 1334f, 62f, 52f, 54f, 34f, blue, true, Gravity.CENTER)
-        addClick(addText("Thêm app", 1409f, 68f, 177f, 35f, 22f, white, true)) { showAppPicker() }
-        addPanel(1599f, 45f, 253f, 91f, intArrayOf(Color.rgb(20, 48, 86), Color.rgb(12, 27, 53)), 18f)
-        addText("⚙", 1630f, 62f, 50f, 54f, 29f, blue, true, Gravity.CENTER)
-        addClick(addText("Cài đặt", 1707f, 68f, 140f, 35f, 22f, white, true)) { showSettings() }
-
-        // Left navigation / library panel
-        addPanel(45f, 202f, 458f, 519f,
-            intArrayOf(Color.rgb(17, 35, 65), Color.rgb(8, 16, 34)), 24f)
-        addText("GAME SPACE", 88f, 245f, 340f, 42f, 23f, white, true)
-        addText("THƯ VIỆN ỨNG DỤNG", 88f, 307f, 340f, 30f, 15f, muted, true)
-        addText("Ứng dụng đã thêm", 88f, 374f, 300f, 34f, 20f, white, true)
-        addText("Chọn ứng dụng bằng nút", 88f, 425f, 340f, 30f, 17f, muted, false)
-        addText("“Thêm app” ở góc trên.", 88f, 460f, 340f, 30f, 17f, muted, false)
-        addPanel(86f, 548f, 365f, 102f, intArrayOf(Color.rgb(20, 52, 91), Color.rgb(11, 28, 54)), 16f)
-        addText("GÁN PHÍM", 111f, 582f, 300f, 36f, 21f, blue, true)
-        addClick(addText("Mở trình chỉnh sửa", 111f, 618f, 300f, 25f, 15f, muted, false)) {
-            startActivity(Intent(this, MappingEditor::class.java))
-        }
-
-        // Main game stage
-        addPanel(434f, 90f, 1029f, 766f,
-            intArrayOf(Color.rgb(18, 39, 72), Color.rgb(7, 15, 32), Color.rgb(12, 27, 52)), 28f)
-        addText("TRÒ CHƠI CỦA BẠN", 490f, 133f, 620f, 42f, 25f, white, true)
-        addText("Chọn game trong thư viện để mở nhanh · Vuốt ngang để chuyển trang", 492f, 180f, 850f, 34f, 19f, muted, false)
-
-        emptyStateViews += addText("+", 805f, 385f, 280f, 130f, 100f, blue, true, Gravity.CENTER)
-        emptyStateViews += addText("CHƯA CÓ ỨNG DỤNG", 650f, 530f, 620f, 48f, 27f, white, true, Gravity.CENTER)
-        emptyStateViews += addText("Nhấn “Thêm app” để bắt đầu tạo Game Space",
-            570f, 584f, 760f, 36f, 18f, muted, false, Gravity.CENTER)
-
-        // System access panel in the lower-right, matching the Canva composition.
-        addPanel(1096f, 832f, 824f, 248f,
-            intArrayOf(Color.rgb(15, 32, 60), Color.rgb(7, 15, 32)), 22f)
-        addText("QUYỀN HỆ THỐNG", 1279f, 858f, 440f, 38f, 24f, white, true)
+        addPanel(0f, 0f, 1920f, 1080f, intArrayOf(Color.rgb(4, 8, 19), Color.rgb(8, 18, 38), Color.rgb(4, 9, 20)), 0f)
+        addText("APX MOUSE", 54f, 42f, 420f, 66f, 40f, white, true)
+        addText("GAMING CONTROL CENTER", 58f, 108f, 420f, 28f, 15f, muted, true)
+        addPanel(1050f, 48f, 280f, 82f, intArrayOf(Color.rgb(20, 55, 96), Color.rgb(10, 28, 52)), 18f)
+        addText("+", 1075f, 60f, 55f, 55f, 34f, blue, true, Gravity.CENTER)
+        addClick(addText("THÊM APP", 1140f, 72f, 170f, 34f, 21f, white, true)) { showAppPicker() }
+        addPanel(1350f, 48f, 250f, 82f, intArrayOf(Color.rgb(20, 48, 86), Color.rgb(12, 27, 53)), 18f)
+        addText("⚙", 1372f, 61f, 52f, 52f, 29f, blue, true, Gravity.CENTER)
+        addClick(addText("CÀI ĐẶT", 1432f, 72f, 150f, 34f, 21f, white, true)) { showSettings() }
+        addPanel(60f, 164f, 1380f, 850f, intArrayOf(Color.rgb(18, 39, 72), Color.rgb(7, 15, 32), Color.rgb(12, 27, 52)), 30f)
+        addText("TRÒ CHƠI CỦA BẠN", 112f, 202f, 650f, 48f, 27f, white, true)
+        addText("Chọn ứng dụng để mở nhanh · Vuốt ngang để chuyển trang", 114f, 253f, 900f, 34f, 18f, muted, false)
+        emptyStateViews += addText("+", 570f, 390f, 300f, 130f, 100f, blue, true, Gravity.CENTER)
+        emptyStateViews += addText("CHƯA CÓ ỨNG DỤNG", 420f, 530f, 600f, 48f, 27f, white, true, Gravity.CENTER)
+        emptyStateViews += addText("Nhấn THÊM APP để đưa trò chơi vào Game Space", 330f, 588f, 780f, 36f, 18f, muted, false, Gravity.CENTER)
+        addPanel(1480f, 164f, 380f, 850f, intArrayOf(Color.rgb(15, 32, 60), Color.rgb(7, 15, 32)), 26f)
+        addText("QUYỀN HỆ THỐNG", 1515f, 205f, 320f, 42f, 23f, white, true)
         shizukuDot = View(this).apply { background = rounded(Color.rgb(248, 113, 113), 20f) }
-        addAt(shizukuDot, 1282f, 914f, 15f, 15f)
-        shizukuStatus = addText("Chưa kết nối", 1317f, 908f, 420f, 34f, 19f, Color.rgb(255, 177, 177), true)
-
-        addPanel(1279f, 966f, 321f, 92f,
-            intArrayOf(Color.rgb(24, 105, 133), Color.rgb(12, 54, 83)), 18f)
-        shizukuButton = addText("Kết nối Shizuku", 1310f, 991f, 260f, 40f, 20f, white, true, Gravity.CENTER)
+        addAt(shizukuDot, 1520f, 285f, 16f, 16f)
+        shizukuStatus = addText("Chưa kết nối", 1550f, 275f, 285f, 48f, 17f, Color.rgb(255, 177, 177), true)
+        addPanel(1515f, 365f, 310f, 86f, intArrayOf(Color.rgb(24, 105, 133), Color.rgb(12, 54, 83)), 18f)
+        shizukuButton = addText("Kết nối Shizuku", 1530f, 388f, 280f, 40f, 19f, white, true, Gravity.CENTER)
         addClick(shizukuButton) { requestShizukuPermission() }
-
-        addPanel(1622f, 966f, 207f, 92f,
-            intArrayOf(Color.rgb(37, 53, 82), Color.rgb(17, 28, 50)), 18f)
-        addClick(addText("Dùng Root", 1644f, 991f, 164f, 40f, 19f, muted, true, Gravity.CENTER)) {
-            toast("Chế độ Root chưa được tích hợp")
-        }
+        addText("ROOT ACCESS", 1518f, 540f, 300f, 32f, 15f, muted, true)
+        addPanel(1515f, 585f, 310f, 86f, intArrayOf(Color.rgb(37, 53, 82), Color.rgb(17, 28, 50)), 18f)
+        addClick(addText("DÙNG ROOT", 1530f, 608f, 280f, 40f, 19f, muted, true, Gravity.CENTER)) { toast("Chế độ Root chưa được tích hợp") }
+        addText("Shizuku và Root là hai phương thức cấp quyền riêng biệt.", 1518f, 710f, 300f, 72f, 14f, muted, false)
         renderGameSpace()
     }
 
