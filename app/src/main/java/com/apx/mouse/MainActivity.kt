@@ -69,10 +69,16 @@ class MainActivity : Activity() {
             showMessage("Game Library")
         }
 
-        addButton("⌨️  Chỉnh sửa gán phím") {
-            showMessage("Key Mapping đang phát triển")
-        }
+addButton("⌨️ Chỉnh sửa gán phím") {
+    startActivity(
+        android.content.Intent(
+            this@MainActivity,
+            MappingEditor::class.java
+        )
+    )
+}
 
+        
         addButton("🖱️  Cài đặt chuột") {
             showMessage("Mouse Settings đang phát triển")
         }
