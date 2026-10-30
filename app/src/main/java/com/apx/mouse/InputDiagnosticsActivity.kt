@@ -43,7 +43,7 @@ class InputDiagnosticsActivity : Activity() {
         })
         val scroll = ScrollView(this)
         output = text("Kết quả chẩn đoán sẽ xuất hiện tại đây.", 12f, Color.rgb(210, 224, 245)).apply {
-            textIsSelectable = true
+            isTextSelectable = true
             typeface = android.graphics.Typeface.MONOSPACE
         }
         scroll.addView(output)
