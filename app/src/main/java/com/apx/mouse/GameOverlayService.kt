@@ -58,7 +58,7 @@ class GameOverlayService : Service() {
                 return
             }
             val inGame = foreground == gamePackage
-            overlayRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
+            overlayRoot?.visibility = if (inGame && isStatsEnabled()) View.VISIBLE else View.GONE
             bubbleRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
             if (!inGame) setFanOpen(false)
             updateMappingOverlay(inGame)
@@ -161,6 +161,7 @@ class GameOverlayService : Service() {
 
         val actions = listOf(
             createAction("⌨", "Chỉnh sửa keymap") { openMappingEditor() },
+            createAction("≋", "Bật / tắt thanh thông số") { toggleStatsOverlay() },
             createAction("–", "Ẩn bong bóng") {
                 manuallyHidden = true
                 setFanOpen(false)
@@ -168,7 +169,7 @@ class GameOverlayService : Service() {
             },
             createAction("×", "Thoát phiên overlay") { stopSelf() }
         )
-        val positions = listOf(Triple(92, 4), Triple(106, 68), Triple(164, 112))
+        val positions = listOf(Triple(92, 4, 48), Triple(28, 62, 48), Triple(106, 68, 48), Triple(164, 112, 48))
         actions.forEachIndexed { index, view ->
             val (x, y) = positions[index]
             root.addView(view, FrameLayout.LayoutParams(dp(48), dp(48)).apply {
@@ -225,7 +226,7 @@ class GameOverlayService : Service() {
         if (fanOpen == open) return
         fanOpen = open
         val root = bubbleRoot ?: return
-        for (index in 0 until minOf(3, root.childCount)) {
+        for (index in 0 until minOf(4, root.childCount)) {
             val item = root.getChildAt(index)
             item.animate().cancel()
             if (open) {
@@ -241,6 +242,18 @@ class GameOverlayService : Service() {
                     .withEndAction { item.visibility = View.GONE }.start()
             }
         }
+    }
+
+    private fun isStatsEnabled(): Boolean =
+        getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+            .getBoolean(STATS_VISIBLE_PREFIX + gamePackage, true)
+
+    private fun toggleStatsOverlay() {
+        val prefs = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+        val enabled = !isStatsEnabled()
+        prefs.edit().putBoolean(STATS_VISIBLE_PREFIX + gamePackage, enabled).apply()
+        overlayRoot?.visibility = if (enabled) View.VISIBLE else View.GONE
+        setFanOpen(false)
     }
 
     private fun openMappingEditor() {
@@ -453,5 +466,6 @@ class GameOverlayService : Service() {
         private const val MAPPING_PREFS = "apx_mouse"
         private const val KEY_PREFIX = "keymap_"
         private const val VISIBLE_PREFIX = "keymap_visible_"
+        private const val STATS_VISIBLE_PREFIX = "stats_visible_"
     }
 }
