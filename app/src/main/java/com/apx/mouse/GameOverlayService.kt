@@ -30,8 +30,6 @@ class GameOverlayService : Service() {
     private var overlayRoot: FrameLayout? = null
     private var mappingRoot: FrameLayout? = null
     private var renderedMapping: String? = null
-    private var fanOpen = false
-    private var manuallyHidden = false
     private var gamePackage: String = ""
     private var lastForegroundPackage: String? = null
     private var lastUsageEventTime: Long = 0L
@@ -51,8 +49,7 @@ class GameOverlayService : Service() {
                 return
             }
             val inGame = foreground == gamePackage
-            overlayRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
-            if (!inGame) setFanOpen(false)
+            overlayRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
             updateMappingOverlay(inGame)
             updateStats()
             handler.postDelayed(this, 1000L)
@@ -85,9 +82,24 @@ class GameOverlayService : Service() {
         val density = resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt()
 
-        val root = FrameLayout(this)
+        // Compact horizontal status bar: battery, network ping and FPS only.
+        val bar = TextView(this).apply {
+            text = "PIN --%    PING --    FPS --"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setPadding(dp(12), 0, dp(12), 0)
+            background = GradientDrawable().apply {
+                setColor(Color.argb(225, 8, 20, 39))
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), Color.rgb(64, 145, 255))
+            }
+            elevation = dp(6).toFloat()
+            contentDescription = "Pin, ping và FPS"
+        }
+
         val params = WindowManager.LayoutParams(
-            dp(224), dp(224),
+            dp(250), dp(40),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
@@ -101,79 +113,19 @@ class GameOverlayService : Service() {
             y = dp(72)
         }
 
-        val fanItems = listOf(
-            createAction("⌨", "Chỉnh sửa thao tác") { openMappingEditor() },
-            createAction("–", "Ẩn overlay") {
-                manuallyHidden = true
-                setFanOpen(false)
-                root.visibility = View.GONE
-            },
-            createAction("×", "Thoát") {
-                stopSelf()
-                startActivity(Intent(this, MainActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
-            }
-        )
-        val positions = listOf(Triple(92, 4, 48), Triple(106, 68, 48), Triple(164, 112, 48))
-        fanItems.forEachIndexed { index, view ->
-            val (x, y, size) = positions[index]
-            root.addView(view, FrameLayout.LayoutParams(dp(size), dp(size)).apply {
-                leftMargin = dp(x)
-                topMargin = dp(y)
-            })
-            view.visibility = View.GONE
+        overlayRoot = FrameLayout(this).apply {
+            addView(bar, FrameLayout.LayoutParams(-1, -1))
+            visibility = View.GONE
         }
-
-        val bubble = FrameLayout(this).apply {
-            background = circle(Color.rgb(17, 35, 62), dp(28).toFloat(), Color.rgb(64, 145, 255), dp(2))
-            elevation = dp(8).toFloat()
-            contentDescription = "Mở menu APX MOUSE"
-            isClickable = true
-        }
-        val icon = ImageView(this).apply {
-            val appIcon = try { packageManager.getApplicationIcon(packageName) } catch (_: Exception) { null }
-            if (appIcon != null) setImageDrawable(appIcon) else setImageResource(android.R.drawable.sym_def_app_icon)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(dp(7), dp(7), dp(7), dp(7))
-        }
-        bubble.addView(icon, FrameLayout.LayoutParams(-1, -1))
-        bubble.setOnClickListener { setFanOpen(!fanOpen) }
-        root.addView(bubble, FrameLayout.LayoutParams(dp(52), dp(52)).apply {
-            leftMargin = dp(164)
-            topMargin = 0
-        })
-
-
-        val stats = TextView(this).apply {
-            text = "PIN --%   FPS --   PING --"
-            textSize = 10f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setPadding(dp(8), 0, dp(8), 0)
-            background = GradientDrawable().apply {
-                setColor(Color.argb(220, 8, 20, 39))
-                cornerRadius = dp(10).toFloat()
-                setStroke(dp(1), Color.rgb(64, 145, 255))
-            }
-            elevation = dp(5).toFloat()
-            contentDescription = "Thông số pin, FPS và ping"
-        }
-        root.addView(stats, FrameLayout.LayoutParams(dp(224), dp(34)).apply {
-            leftMargin = 0
-            topMargin = dp(174)
-        })
-        statsView = stats
-
-        root.visibility = View.GONE
-        overlayRoot = root
+        statsView = bar
         try {
-            windowManager.addView(root, params)
+            windowManager.addView(overlayRoot, params)
         } catch (_: Exception) {
             overlayRoot = null
+            statsView = null
             stopSelf()
         }
     }
-
 
     private fun updateStats() {
         val batteryIntent = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -183,7 +135,7 @@ class GameOverlayService : Service() {
         val batteryText = if (percent >= 0) "$percent%" else "--"
         // Android does not expose reliable per-game FPS or game-server ping
         // to ordinary overlay apps; keep unavailable values explicit.
-        statsView?.text = "PIN $batteryText   FPS --   PING --"
+        statsView?.text = "PIN $batteryText    PING --    FPS --"
     }
 
     private fun updateMappingOverlay(inGame: Boolean) {
