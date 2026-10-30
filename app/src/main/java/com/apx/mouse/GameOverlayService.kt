@@ -488,6 +488,7 @@ class GameOverlayService : Service() {
         val toggleCode = prefs.getInt(keyToggle, KeyEvent.KEYCODE_UNKNOWN)
         var selectedMode = prefs.getString(keyMode, "fps") ?: "fps"
         var bindingToggleKey = false
+        var keyLabelView: TextView? = null
 
         fun label(value: String, size: Float, color: Int = Color.WHITE, bold: Boolean = false) =
             TextView(this).apply {
@@ -517,6 +518,7 @@ class GameOverlayService : Service() {
                 if (bindingToggleKey && event.action == KeyEvent.ACTION_DOWN &&
                     event.keyCode != KeyEvent.KEYCODE_BACK) {
                     prefs.edit().putInt(keyToggle, event.keyCode).apply()
+                    keyLabelView?.text = "Phím đã chọn: " + KeyEvent.keyCodeToString(event.keyCode)
                     bindingToggleKey = false
                     return true
                 }
@@ -564,7 +566,8 @@ class GameOverlayService : Service() {
             bindingToggleKey = true; cursorStatus.text = "Nhấn phím muốn gán…"; root.requestFocus()
         }, LinearLayout.LayoutParams(-1, dp(40)))
         val savedKey = if (toggleCode == KeyEvent.KEYCODE_UNKNOWN) "Chưa gán" else KeyEvent.keyCodeToString(toggleCode)
-        panel.addView(label("Phím đã chọn: $savedKey", 10f, Color.LTGRAY), LinearLayout.LayoutParams(-1, dp(24)))
+        keyLabelView = label("Phím đã chọn: $savedKey", 10f, Color.LTGRAY)
+        panel.addView(keyLabelView, LinearLayout.LayoutParams(-1, dp(24)))
         panel.addView(label("Cấu hình được lưu theo game. Khóa chuột và phím tắt toàn hệ thống chưa hoạt động cho đến khi có Input Engine tương thích.", 10f, Color.rgb(255, 205, 130)),
             LinearLayout.LayoutParams(-1, dp(48)))
 
