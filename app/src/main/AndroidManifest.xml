@@ -29,6 +29,15 @@
             android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
+        <service
+            android:name=".GameOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating game controls shown only during a Game Space launch session." />
+        </service>
+
         <activity
             android:name=".MappingEditor"
             android:exported="false" />
