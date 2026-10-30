@@ -19,7 +19,7 @@ object DisplayScaleController {
     private const val KEY_DENSITY = "display_original_density"
     private const val KEY_SIZE_OVERRIDE = "display_original_size_override"
     private const val KEY_DENSITY_OVERRIDE = "display_original_density_override"
-    private const val SERVICE_VERSION = 1
+    private const val SERVICE_VERSION = 2
 
     data class Result(val success: Boolean, val output: String)
 
