@@ -33,6 +33,7 @@ class GameOverlayService : Service() {
     private var layoutParams: WindowManager.LayoutParams? = null
     private var lastForegroundPackage: String? = null
     private var lastUsageEventTime: Long = 0L
+    private var gameActivityDestroyedAt: Long? = null
 
     private val monitor = object : Runnable {
         override fun run() {
@@ -41,6 +42,11 @@ class GameOverlayService : Service() {
                 return
             }
             val foreground = currentForegroundPackage()
+            val destroyedAt = gameActivityDestroyedAt
+            if (destroyedAt != null && System.currentTimeMillis() - destroyedAt > 2500L) {
+                stopSelf()
+                return
+            }
             val shouldShow = foreground == gamePackage && !manuallyHidden
             overlayRoot?.visibility = if (shouldShow) View.VISIBLE else View.GONE
             if (!shouldShow) setFanOpen(false)
@@ -59,6 +65,7 @@ class GameOverlayService : Service() {
         gamePackage = intent?.getStringExtra(EXTRA_GAME_PACKAGE).orEmpty()
         lastForegroundPackage = null
         lastUsageEventTime = System.currentTimeMillis() - 30_000L
+        gameActivityDestroyedAt = null
         if (gamePackage.isBlank() || !android.provider.Settings.canDrawOverlays(this) || !hasUsageAccess()) {
             stopSelf()
             return START_NOT_STICKY
@@ -205,7 +212,13 @@ class GameOverlayService : Service() {
             events.getNextEvent(event)
             when (event.eventType) {
                 UsageEvents.Event.MOVE_TO_FOREGROUND,
-                UsageEvents.Event.ACTIVITY_RESUMED -> lastForegroundPackage = event.packageName
+                UsageEvents.Event.ACTIVITY_RESUMED -> {
+                    lastForegroundPackage = event.packageName
+                    if (event.packageName == gamePackage) gameActivityDestroyedAt = null
+                }
+                UsageEvents.Event.ACTIVITY_DESTROYED -> {
+                    if (event.packageName == gamePackage) gameActivityDestroyedAt = event.timeStamp
+                }
                 UsageEvents.Event.MOVE_TO_BACKGROUND,
                 UsageEvents.Event.ACTIVITY_PAUSED -> {
                     if (lastForegroundPackage == event.packageName) lastForegroundPackage = null
