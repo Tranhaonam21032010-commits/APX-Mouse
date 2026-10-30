@@ -9,6 +9,10 @@ import java.util.concurrent.TimeUnit
  * Runs as Shizuku shell/root identity. Only display-related wm commands are accepted.
  */
 class DisplayShellUserService : IDisplayShellService.Stub() {
+    override fun destroy() {
+        Thread { System.exit(0) }.start()
+    }
+
     override fun execute(command: String): String {
         val normalized = command.trim()
         if (!(normalized == "wm size" || normalized == "wm density" ||
