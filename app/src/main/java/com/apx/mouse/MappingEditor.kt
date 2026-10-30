@@ -131,9 +131,9 @@ class MappingEditor : Activity() {
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (selectedIndex in points.indices && event.action == MotionEvent.ACTION_BUTTON_PRESS) {
             val key = when {
-                event.buttonState and MotionEvent.BUTTON_PRIMARY != 0 -> KeyEvent.KEYCODE_BUTTON_PRIMARY
-                event.buttonState and MotionEvent.BUTTON_SECONDARY != 0 -> KeyEvent.KEYCODE_BUTTON_SECONDARY
-                event.buttonState and MotionEvent.BUTTON_TERTIARY != 0 -> KeyEvent.KEYCODE_BUTTON_MIDDLE
+                event.buttonState and MotionEvent.BUTTON_PRIMARY != 0 -> KeyEvent.KEYCODE_BUTTON_1
+                event.buttonState and MotionEvent.BUTTON_SECONDARY != 0 -> KeyEvent.KEYCODE_BUTTON_2
+                event.buttonState and MotionEvent.BUTTON_TERTIARY != 0 -> KeyEvent.KEYCODE_BUTTON_3
                 else -> KeyEvent.KEYCODE_UNKNOWN
             }
             if (key != KeyEvent.KEYCODE_UNKNOWN) {
@@ -146,9 +146,9 @@ class MappingEditor : Activity() {
     }
 
     private fun displayKey(code: Int): String = when (code) {
-        KeyEvent.KEYCODE_BUTTON_PRIMARY -> "CHUỘT TRÁI"
-        KeyEvent.KEYCODE_BUTTON_SECONDARY -> "CHUỘT PHẢI"
-        KeyEvent.KEYCODE_BUTTON_MIDDLE -> "CHUỘT GIỮA"
+        KeyEvent.KEYCODE_BUTTON_1 -> "CHUỘT TRÁI"
+        KeyEvent.KEYCODE_BUTTON_2 -> "CHUỘT PHẢI"
+        KeyEvent.KEYCODE_BUTTON_3 -> "CHUỘT GIỮA"
         else -> KeyEvent.keyCodeToString(code).removePrefix("KEYCODE_")
     }
 
