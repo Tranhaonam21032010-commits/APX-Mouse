@@ -81,6 +81,26 @@ object DisplayScaleController {
         }
     }
 
+    fun inputInventory(): Result {
+        val service = shell
+        if (service == null || service.asBinder()?.isBinderAlive != true)
+            return Result(false, bindError ?: "Shizuku UserService chưa sẵn sàng")
+        return try {
+            val output = service.inputInventory().trim()
+            Result(!output.startsWith("ERROR:"), output)
+        } catch (e: Exception) { Result(false, "Lỗi đọc input: ${e.message}") }
+    }
+
+    fun captureInputEvents(seconds: Int = 5): Result {
+        val service = shell
+        if (service == null || service.asBinder()?.isBinderAlive != true)
+            return Result(false, bindError ?: "Shizuku UserService chưa sẵn sàng")
+        return try {
+            val output = service.captureInputEvents(seconds.coerceIn(2, 8)).trim()
+            Result(!output.startsWith("ERROR:"), output)
+        } catch (e: Exception) { Result(false, "Lỗi đọc sự kiện: ${e.message}") }
+    }
+
     fun captureOriginal(context: Context): Result {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (prefs.getBoolean(KEY_CAPTURED, false)) return Result(true, "Đã lưu thông số màn hình gốc")
