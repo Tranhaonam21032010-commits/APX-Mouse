@@ -353,7 +353,7 @@ class GameOverlayService : Service() {
             textSize = 18f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            background = rounded(Color.rgb(24, 48, 78), dp(8).toFloat())
+            background = GradientDrawable().apply { setColor(Color.rgb(24, 48, 78)); cornerRadius = dp(8).toFloat() }
             isClickable = true
             setOnClickListener { action() }
         }
@@ -378,7 +378,7 @@ class GameOverlayService : Service() {
             setTextColor(Color.WHITE)
             background = GradientDrawable().apply { setColor(Color.rgb(20, 70, 120)); cornerRadius = dp(8).toFloat() }
             isClickable = true
-            setOnClickListener(action)
+            setOnClickListener { action() }
         }
         actions.addView(actionButton("ÁP DỤNG", {
             val saved = DisplayScaleController.captureOriginal(this@GameOverlayService)
