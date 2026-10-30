@@ -36,6 +36,7 @@ class GameOverlayService : Service() {
     private var lastForegroundPackage: String? = null
     private var lastUsageEventTime: Long = 0L
     private var gameActivityDestroyedAt: Long? = null
+    private var statsView: TextView? = null
 
     private val monitor = object : Runnable {
         override fun run() {
@@ -53,7 +54,8 @@ class GameOverlayService : Service() {
             overlayRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
             if (!inGame) setFanOpen(false)
             updateMappingOverlay(inGame)
-            handler.postDelayed(this, 650L)
+            updateStats()
+            handler.postDelayed(this, 1000L)
         }
     }
 
@@ -123,7 +125,7 @@ class GameOverlayService : Service() {
         }
 
         val bubble = FrameLayout(this).apply {
-            background = circle(Color.rgb(17, 35, 62), dp(28).toFloat(), Color.rgb(64, 145, 255), dp(2).toFloat())
+            background = circle(Color.rgb(17, 35, 62), dp(28).toFloat(), Color.rgb(64, 145, 255), dp(2))
             elevation = dp(8).toFloat()
             contentDescription = "Mở menu APX MOUSE"
             isClickable = true
@@ -141,6 +143,27 @@ class GameOverlayService : Service() {
             topMargin = 0
         })
 
+
+        val stats = TextView(this).apply {
+            text = "PIN --%   FPS --   PING --"
+            textSize = 10f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setPadding(dp(8), 0, dp(8), 0)
+            background = GradientDrawable().apply {
+                setColor(Color.argb(220, 8, 20, 39))
+                cornerRadius = dp(10).toFloat()
+                setStroke(dp(1), Color.rgb(64, 145, 255))
+            }
+            elevation = dp(5).toFloat()
+            contentDescription = "Thông số pin, FPS và ping"
+        }
+        root.addView(stats, FrameLayout.LayoutParams(dp(224), dp(34)).apply {
+            leftMargin = 0
+            topMargin = dp(174)
+        })
+        statsView = stats
+
         root.visibility = View.GONE
         overlayRoot = root
         try {
@@ -149,6 +172,18 @@ class GameOverlayService : Service() {
             overlayRoot = null
             stopSelf()
         }
+    }
+
+
+    private fun updateStats() {
+        val batteryIntent = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
+        val percent = if (level >= 0 && scale > 0) (level * 100 / scale) else -1
+        val batteryText = if (percent >= 0) "$percent%" else "--"
+        // Android does not expose reliable per-game FPS or game-server ping
+        // to ordinary overlay apps; keep unavailable values explicit.
+        statsView?.text = "PIN $batteryText   FPS --   PING --"
     }
 
     private fun updateMappingOverlay(inGame: Boolean) {
@@ -285,9 +320,6 @@ class GameOverlayService : Service() {
                     lastForegroundPackage = event.packageName
                     if (event.packageName == gamePackage) gameActivityDestroyedAt = null
                 }
-                UsageEvents.Event.ACTIVITY_DESTROYED -> {
-                    if (event.packageName == gamePackage) gameActivityDestroyedAt = event.timeStamp
-                }
                 UsageEvents.Event.MOVE_TO_BACKGROUND,
                 UsageEvents.Event.ACTIVITY_PAUSED -> {
                     if (lastForegroundPackage == event.packageName) lastForegroundPackage = null
@@ -348,6 +380,7 @@ class GameOverlayService : Service() {
         handler.removeCallbacksAndMessages(null)
         overlayRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         overlayRoot = null
+        statsView = null
         removeMappingOverlay()
         super.onDestroy()
     }
