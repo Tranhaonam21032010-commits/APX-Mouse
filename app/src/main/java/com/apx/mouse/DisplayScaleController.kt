@@ -144,6 +144,11 @@ object DisplayScaleController {
         return Result(true, "Đã khôi phục màn hình về ${width}×${height}, ${dpi} DPI")
     }
 
+    fun keep(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_CAPTURED, false).apply()
+    }
+
     @Synchronized
     fun disconnect() {
         try {
