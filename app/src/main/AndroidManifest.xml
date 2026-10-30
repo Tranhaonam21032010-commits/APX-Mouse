@@ -42,6 +42,11 @@
         </service>
 
         <activity
+            android:name=".DisplayScaleActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <activity
             android:name=".MappingEditor"
             android:exported="false"
             android:screenOrientation="landscape" />
