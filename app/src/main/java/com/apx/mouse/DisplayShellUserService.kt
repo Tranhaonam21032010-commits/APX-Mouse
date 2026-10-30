@@ -30,12 +30,38 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
     private fun runDiagnostic(command: String, timeoutSeconds: Long): String {
         return try {
             val process = ProcessBuilder("sh", "-c", command).redirectErrorStream(true).start()
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                process.destroyForcibly()
+            val output = StringBuilder()
+            val reader = Thread {
+                try {
+                    process.inputStream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            synchronized(output) {
+                                if (output.length < 16000) {
+                                    output.append(line).append('\n')
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // The process may be terminated after the timeout.
+                }
+            }.apply {
+                name = "APX-InputDiagnostic-Reader"
+                isDaemon = true
+                start()
+            }
+
+            if (!process.waitFor(timeoutSeconds.coerceAtLeast(1), TimeUnit.SECONDS)) {
+                process.destroy()
+                if (!process.waitFor(300, TimeUnit.MILLISECONDS)) process.destroyForcibly()
+                reader.join(500)
                 return "ERROR: Chẩn đoán vượt quá thời gian cho phép"
             }
-            output.take(16000).ifBlank { "(Không có dữ liệu trả về)" }
+
+            reader.join(700)
+            synchronized(output) {
+                output.toString().take(16000).ifBlank { "(Không có dữ liệu trả về)" }
+            }
         } catch (e: Exception) {
             "ERROR: ${e.message ?: "Không chạy được chẩn đoán"}"
         }
