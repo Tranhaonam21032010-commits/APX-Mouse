@@ -42,7 +42,8 @@
 
         <activity
             android:name=".MappingEditor"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="landscape" />
 
         <activity
             android:name=".MainActivity"
