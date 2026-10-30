@@ -9,6 +9,8 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -16,6 +18,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.view.Gravity
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -35,6 +39,11 @@ class GameOverlayService : Service() {
     private var manuallyHidden = false
     private var mappingRoot: FrameLayout? = null
     private var renderedMapping: String? = null
+    private var editorRoot: FrameLayout? = null
+    private val editorPoints = mutableListOf<EditorPoint>()
+    private var editorSelected = -1
+    private var editorGamePackage = ""
+    private var editorCanvas: View? = null
     private var gamePackage: String = ""
     private var lastForegroundPackage: String? = null
     private var lastUsageEventTime: Long = 0L
@@ -275,11 +284,191 @@ class GameOverlayService : Service() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    private data class EditorPoint(var x: Float, var y: Float, var keyCode: Int = KeyEvent.KEYCODE_UNKNOWN)
+
     private fun openMappingEditor() {
         setFanOpen(false)
-        startActivity(Intent(this, MappingEditor::class.java)
-            .putExtra(MappingEditor.EXTRA_GAME_PACKAGE, gamePackage)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        if (editorRoot != null) { closeMappingEditor(); return }
+        editorGamePackage = gamePackage
+        editorPoints.clear()
+        editorSelected = -1
+        val raw = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE).getString(KEY_PREFIX + editorGamePackage, null)
+        try {
+            if (!raw.isNullOrBlank()) {
+                val array = JSONArray(raw)
+                for (i in 0 until array.length()) {
+                    val item = array.getJSONObject(i)
+                    editorPoints.add(EditorPoint(item.optDouble("x", 0.5).toFloat().coerceIn(0f, 1f),
+                        item.optDouble("y", 0.5).toFloat().coerceIn(0f, 1f),
+                        item.optInt("key", KeyEvent.KEYCODE_UNKNOWN)))
+                }
+            }
+        } catch (_: Exception) { }
+
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+        val root = object : FrameLayout(this) {
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                if (event.action == KeyEvent.ACTION_DOWN && editorSelected in editorPoints.indices &&
+                    event.keyCode != KeyEvent.KEYCODE_BACK) {
+                    editorPoints[editorSelected].keyCode = event.keyCode
+                    editorCanvas?.invalidate()
+                    return true
+                }
+                if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                    closeMappingEditor()
+                    return true
+                }
+                return super.dispatchKeyEvent(event)
+            }
+        }.apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            isFocusable = true
+            isFocusableInTouchMode = true
+        }
+
+        val canvas = object : View(this) {
+            private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+            private var dragging = false
+            override fun onDraw(c: Canvas) {
+                super.onDraw(c)
+                editorPoints.forEachIndexed { index, point ->
+                    val cx = point.x * width
+                    val cy = point.y * height
+                    p.style = Paint.Style.FILL
+                    p.color = if (index == editorSelected) Color.argb(225, 0, 155, 255) else Color.argb(205, 8, 35, 66)
+                    c.drawCircle(cx, cy, dp(23).toFloat(), p)
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = dp(2).toFloat()
+                    p.color = Color.rgb(0, 190, 255)
+                    c.drawCircle(cx, cy, dp(23).toFloat(), p)
+                    p.style = Paint.Style.FILL
+                    p.color = Color.WHITE
+                    p.textSize = dp(11).toFloat()
+                    p.textAlign = Paint.Align.CENTER
+                    val label = if (point.keyCode == KeyEvent.KEYCODE_UNKNOWN) "+" else editorKeyLabel(point.keyCode)
+                    c.drawText(label.take(7), cx, cy + dp(4).toFloat(), p)
+                }
+            }
+            override fun onTouchEvent(e: MotionEvent): Boolean {
+                when (e.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        val hit = editorPoints.indices.reversed().firstOrNull { i ->
+                            val dx = editorPoints[i].x * width - e.x
+                            val dy = editorPoints[i].y * height - e.y
+                            dx * dx + dy * dy < dp(34) * dp(34).toFloat()
+                        }
+                        if (hit == null) {
+                            editorPoints.add(EditorPoint((e.x / width.coerceAtLeast(1)).coerceIn(0f, 1f),
+                                (e.y / height.coerceAtLeast(1)).coerceIn(0f, 1f)))
+                            editorSelected = editorPoints.lastIndex
+                            dragging = false
+                        } else { editorSelected = hit; dragging = true }
+                        invalidate()
+                        root.requestFocus()
+                        return true
+                    }
+                    MotionEvent.ACTION_MOVE -> if (dragging && editorSelected in editorPoints.indices) {
+                        editorPoints[editorSelected].x = (e.x / width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                        editorPoints[editorSelected].y = (e.y / height.coerceAtLeast(1)).coerceIn(0f, 1f)
+                        invalidate()
+                        return true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { dragging = false; return true }
+                }
+                return true
+            }
+        }
+        editorCanvas = canvas
+        root.addView(canvas, FrameLayout.LayoutParams(-1, -1))
+
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            background = GradientDrawable().apply {
+                setColor(Color.argb(225, 5, 16, 32))
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), Color.rgb(0, 150, 230))
+            }
+        }
+        fun tool(label: String, action: () -> Unit) {
+            toolbar.addView(TextView(this).apply {
+                text = label; textSize = 12f; gravity = Gravity.CENTER
+                setTextColor(Color.WHITE); setPadding(dp(9), dp(10), dp(9), dp(10))
+                isClickable = true; setOnClickListener { action() }
+            }, LinearLayout.LayoutParams(-2, dp(42)))
+        }
+        tool("＋ Thêm") {
+            editorPoints.add(EditorPoint(0.5f, 0.5f)); editorSelected = editorPoints.lastIndex; canvas.invalidate()
+        }
+        tool("Xóa") {
+            if (editorSelected in editorPoints.indices) {
+                editorPoints.removeAt(editorSelected); editorSelected = -1; canvas.invalidate()
+            }
+        }
+        tool("Bỏ gán") {
+            if (editorSelected in editorPoints.indices) {
+                editorPoints[editorSelected].keyCode = KeyEvent.KEYCODE_UNKNOWN; canvas.invalidate()
+            }
+        }
+        tool("Lưu") { saveEditorMappings() }
+        tool("Đóng") { closeMappingEditor() }
+        root.addView(toolbar, FrameLayout.LayoutParams(-2, dp(50), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            topMargin = dp(8)
+        })
+        val hint = TextView(this).apply {
+            text = "Chạm vị trí trong game để thêm nút · Kéo để di chuyển · Chọn nút rồi nhấn phím"
+            textSize = 11f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+            background = GradientDrawable().apply {
+                setColor(Color.argb(190, 5, 16, 32)); cornerRadius = dp(8).toFloat()
+            }
+        }
+        root.addView(hint, FrameLayout.LayoutParams(-1, dp(34), Gravity.BOTTOM))
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.START }
+        try {
+            windowManager.addView(root, params)
+            editorRoot = root
+            bubbleRoot?.visibility = View.GONE
+            root.requestFocus()
+        } catch (_: Exception) { editorRoot = null; editorCanvas = null }
+    }
+
+    private fun editorKeyLabel(code: Int): String = when (code) {
+        KeyEvent.KEYCODE_BUTTON_1 -> "LMB"
+        KeyEvent.KEYCODE_BUTTON_2 -> "RMB"
+        KeyEvent.KEYCODE_BUTTON_3 -> "MMB"
+        else -> KeyEvent.keyCodeToString(code).removePrefix("KEYCODE_")
+    }
+
+    private fun saveEditorMappings() {
+        val array = JSONArray()
+        editorPoints.forEach { point ->
+            array.put(JSONObject().put("x", point.x).put("y", point.y).put("key", point.keyCode))
+        }
+        getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE).edit()
+            .putString(KEY_PREFIX + editorGamePackage, array.toString())
+            .putBoolean(VISIBLE_PREFIX + editorGamePackage, true).apply()
+        renderedMapping = null
+        editorCanvas?.invalidate()
+        android.widget.Toast.makeText(this, "Đã lưu \${editorPoints.size} nút", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun closeMappingEditor() {
+        editorRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
+        editorRoot = null
+        editorCanvas = null
+        renderedMapping = null
+        bubbleRoot?.visibility = View.VISIBLE
+        updateMappingOverlay(true)
     }
 
     private fun updateStats() {
@@ -473,6 +662,7 @@ class GameOverlayService : Service() {
         bubbleRoot = null
         statsView = null
         removeMappingOverlay()
+        closeMappingEditor()
         DisplayScaleController.restore(this)
         super.onDestroy()
     }
