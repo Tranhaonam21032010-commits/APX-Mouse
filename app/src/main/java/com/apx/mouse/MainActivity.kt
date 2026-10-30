@@ -9,6 +9,10 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Build
+import android.provider.Settings
+import android.app.AppOpsManager
+import android.content.Context
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -231,7 +235,35 @@ class MainActivity : Activity() {
             prefs.edit().putStringSet(KEY_SELECTED_APPS, selectedPackages.toSet()).apply()
             renderGameSpace()
             toast("Ứng dụng không còn khả dụng")
-        } else startActivity(launchIntent)
+        } else {
+            if (!Settings.canDrawOverlays(this)) {
+                toast("Cấp quyền hiển thị trên ứng dụng khác để dùng overlay")
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:$packageName")))
+                return
+            }
+            if (!hasUsageAccess()) {
+                toast("Cấp quyền Truy cập dữ liệu sử dụng để APX nhận biết khi bạn rời game")
+                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                return
+            }
+            val serviceIntent = Intent(this, GameOverlayService::class.java)
+                .putExtra(GameOverlayService.EXTRA_GAME_PACKAGE, packageName)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+            else startService(serviceIntent)
+            startActivity(launchIntent)
+        }
+    }
+
+    private fun hasUsageAccess(): Boolean {
+        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
+        } else {
+            @Suppress("DEPRECATION")
+            appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
     }
 
     private fun showSettings() {
