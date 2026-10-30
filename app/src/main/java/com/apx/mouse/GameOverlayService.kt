@@ -31,6 +31,8 @@ class GameOverlayService : Service() {
     private var manuallyHidden = false
     private var gamePackage: String = ""
     private var layoutParams: WindowManager.LayoutParams? = null
+    private var lastForegroundPackage: String? = null
+    private var lastUsageEventTime: Long = 0L
 
     private val monitor = object : Runnable {
         override fun run() {
@@ -55,6 +57,8 @@ class GameOverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         gamePackage = intent?.getStringExtra(EXTRA_GAME_PACKAGE).orEmpty()
+        lastForegroundPackage = null
+        lastUsageEventTime = System.currentTimeMillis() - 30_000L
         if (gamePackage.isBlank() || !android.provider.Settings.canDrawOverlays(this) || !hasUsageAccess()) {
             stopSelf()
             return START_NOT_STICKY
@@ -175,19 +179,22 @@ class GameOverlayService : Service() {
     private fun currentForegroundPackage(): String? {
         val usage = getSystemService(USAGE_STATS_SERVICE) as UsageStatsManager
         val now = System.currentTimeMillis()
-        val events = usage.queryEvents(now - 4000L, now)
+        val from = if (lastUsageEventTime == 0L) now - 30_000L else lastUsageEventTime
+        val events = usage.queryEvents(from, now)
         val event = UsageEvents.Event()
-        var foreground: String? = null
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
             when (event.eventType) {
                 UsageEvents.Event.MOVE_TO_FOREGROUND,
-                UsageEvents.Event.ACTIVITY_RESUMED -> foreground = event.packageName
+                UsageEvents.Event.ACTIVITY_RESUMED -> lastForegroundPackage = event.packageName
                 UsageEvents.Event.MOVE_TO_BACKGROUND,
-                UsageEvents.Event.ACTIVITY_PAUSED -> if (foreground == event.packageName) foreground = null
+                UsageEvents.Event.ACTIVITY_PAUSED -> {
+                    if (lastForegroundPackage == event.packageName) lastForegroundPackage = null
+                }
             }
         }
-        return foreground
+        lastUsageEventTime = now
+        return lastForegroundPackage
     }
 
     private fun hasUsageAccess(): Boolean {
