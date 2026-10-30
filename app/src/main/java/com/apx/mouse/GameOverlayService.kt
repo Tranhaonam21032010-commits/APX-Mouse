@@ -174,12 +174,13 @@ class GameOverlayService : Service() {
         // Each interactive control gets its own small window. A large transparent
         // touchable window would steal taps from the game across its whole rectangle.
         val positions = listOf(
-            Triple(92, 4, 48), Triple(28, 62, 48), Triple(8, 122, 48),
-            Triple(106, 154, 48), Triple(164, 112, 48)
+            Triple(104, 0, 56), Triple(34, 48, 56), Triple(0, 112, 56),
+            Triple(44, 180, 56), Triple(128, 180, 56), Triple(190, 112, 56)
         )
         val actions = listOf(
             createAction("⌨", "Chỉnh sửa keymap") { openMappingEditor() },
             createAction("≋", "Bật / tắt thanh thông số") { toggleStatsOverlay() },
+            createAction("🖱", "Tweak Mouse") { openMouseTweak() },
             createAction("–", "Ẩn bong bóng") {
                 manuallyHidden = true
                 setFanOpen(false)
@@ -198,7 +199,7 @@ class GameOverlayService : Service() {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.END
-                x = dp(8 + 224 - left - size)
+                x = dp(8 + 252 - left - size)
                 y = dp(72 + top)
             }
             view.visibility = View.GONE
@@ -209,7 +210,7 @@ class GameOverlayService : Service() {
         }
 
         val bubble = FrameLayout(this).apply {
-            background = circle(Color.rgb(17, 35, 62), dp(28).toFloat(), Color.rgb(64, 145, 255), dp(2))
+            background = circle(Color.rgb(17, 35, 62), dp(34).toFloat(), Color.rgb(64, 145, 255), dp(2))
             elevation = dp(8).toFloat()
             contentDescription = "Mở menu APX MOUSE"
             isClickable = true
@@ -218,12 +219,12 @@ class GameOverlayService : Service() {
             // Use the APX wolf logo asset directly, not the launcher/adaptive icon wrapper.
             setImageResource(R.drawable.apx_mouse_logo)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(dp(5), dp(5), dp(5), dp(5))
+            setPadding(dp(7), dp(7), dp(7), dp(7))
         }
         bubble.addView(icon, FrameLayout.LayoutParams(-1, -1))
         bubble.setOnClickListener { setFanOpen(!fanOpen) }
         val bubbleParams = WindowManager.LayoutParams(
-            dp(52), dp(52), type,
+            dp(64), dp(64), type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -244,10 +245,10 @@ class GameOverlayService : Service() {
 
     private fun createAction(symbol: String, label: String, action: () -> Unit): View {
         val density = resources.displayMetrics.density
-        val size = (48 * density).toInt()
+        val size = (56 * density).toInt()
         return TextView(this).apply {
             text = symbol
-            textSize = 21f
+            textSize = 24f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             background = circle(Color.rgb(22, 45, 76), size / 2f, Color.rgb(64, 145, 255), (1.5f * density).toInt())
@@ -269,10 +270,10 @@ class GameOverlayService : Service() {
                 item.scaleX = 0.25f
                 item.scaleY = 0.25f
                 item.animate().alpha(1f).scaleX(1f).scaleY(1f)
-                    .setStartDelay(index * 35L).setDuration(180L).start()
+                    .setStartDelay(0L).setDuration(90L).start()
             } else {
                 item.animate().alpha(0f).scaleX(0.25f).scaleY(0.25f)
-                    .setStartDelay(0L).setDuration(120L)
+                    .setStartDelay(0L).setDuration(70L)
                     .withEndAction { item.visibility = View.GONE }.start()
             }
         }
@@ -293,6 +294,13 @@ class GameOverlayService : Service() {
     private fun openDisplayScale() {
         setFanOpen(false)
         startActivity(Intent(this, DisplayScaleActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    private fun openMouseTweak() {
+        setFanOpen(false)
+        startActivity(Intent(this, MouseTweakActivity::class.java)
+            .putExtra(MouseTweakActivity.EXTRA_GAME_PACKAGE, gamePackage)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
