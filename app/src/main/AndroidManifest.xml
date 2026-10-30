@@ -47,6 +47,11 @@
             android:screenOrientation="landscape" />
 
         <activity
+            android:name=".InputDiagnosticsActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <activity
             android:name=".DisplayScaleActivity"
             android:exported="false"
             android:screenOrientation="landscape" />
