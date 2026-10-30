@@ -51,6 +51,13 @@ class GameOverlayService : Service() {
     private var gameActivityDestroyedAt: Long? = null
     private var outsideGameSince: Long? = null
     private var statsView: TextView? = null
+    private var scaleRoot: FrameLayout? = null
+    private var scaleCountdown: TextView? = null
+    private var scalePreviewPending = false
+    private var scaleWidth = 1600
+    private var scaleHeight = 900
+    private var scaleDpi = 420
+    private var scaleTimeout: Runnable? = null
     private val pingExecutor = Executors.newSingleThreadExecutor()
     private val pingInProgress = AtomicBoolean(false)
     @Volatile private var networkPingText: String = "--"
@@ -67,6 +74,8 @@ class GameOverlayService : Service() {
             // The overlay is hidden outside the selected game and reappears when that game resumes.
             val inGame = foreground == gamePackage
             if (inGame) outsideGameSince = null
+            if (!inGame && scalePreviewPending) closeDisplayScalePanel(restore = true)
+            scaleRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
             overlayRoot?.visibility = if (inGame && isStatsEnabled()) View.VISIBLE else View.GONE
             bubbleRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
             if (!inGame) setFanOpen(false)
@@ -94,7 +103,6 @@ class GameOverlayService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        DisplayScaleController.captureOriginal(this)
         if (overlayRoot == null) createOverlay()
         if (bubbleRoot == null) createBubbleOverlay()
         handler.removeCallbacks(monitor)
@@ -284,8 +292,177 @@ class GameOverlayService : Service() {
 
     private fun openDisplayScale() {
         setFanOpen(false)
-        startActivity(Intent(this, DisplayScaleActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        if (scaleRoot != null) {
+            scaleRoot?.visibility = View.VISIBLE
+            return
+        }
+        val connection = DisplayScaleController.connect(this)
+        if (!connection.success) {
+            android.widget.Toast.makeText(this, connection.output, android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable().apply {
+                setColor(Color.argb(245, 7, 18, 36))
+                cornerRadius = dp(14).toFloat()
+                setStroke(dp(1), Color.rgb(64, 145, 255))
+            }
+            elevation = dp(10).toFloat()
+        }
+        fun label(text: String, size: Float, color: Int = Color.WHITE) = TextView(this).apply {
+            this.text = text
+            textSize = size
+            setTextColor(color)
+            gravity = Gravity.CENTER
+        }
+        val title = label("APX DISPLAY · GAME", 14f).apply { typeface = android.graphics.Typeface.DEFAULT_BOLD }
+        panel.addView(title, LinearLayout.LayoutParams(-1, dp(28)))
+        panel.addView(label("Độ phân giải", 11f, Color.LTGRAY), LinearLayout.LayoutParams(-1, dp(22)))
+        val presets = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val choices = listOf(Triple("1920×1080", 1920, 1080), Triple("1600×900", 1600, 900), Triple("1280×720", 1280, 720))
+        choices.forEach { choice ->
+            val button = TextView(this).apply {
+                text = choice.first
+                textSize = 10f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                background = rounded(Color.rgb(24, 48, 78), dp(8).toFloat())
+                isClickable = true
+                setOnClickListener {
+                    scaleWidth = choice.second
+                    scaleHeight = choice.third
+                    status.text = "Đã chọn ${choice.first}"
+                }
+            }
+            presets.addView(button, LinearLayout.LayoutParams(0, dp(36), 1f).apply {
+                setMargins(dp(2), 0, dp(2), 0)
+            })
+        }
+        panel.addView(presets, LinearLayout.LayoutParams(-1, dp(40)))
+        val dpiRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val dpiText = label("DPI: $scaleDpi", 12f, Color.rgb(150, 205, 255))
+        fun smallButton(text: String, action: () -> Unit) = TextView(this).apply {
+            this.text = text
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(24, 48, 78), dp(8).toFloat())
+            isClickable = true
+            setOnClickListener(action)
+        }
+        dpiRow.addView(smallButton("−") {
+            scaleDpi = (scaleDpi - 20).coerceAtLeast(100)
+            dpiText.text = "DPI: $scaleDpi"
+        }, LinearLayout.LayoutParams(dp(42), dp(34)))
+        dpiRow.addView(dpiText, LinearLayout.LayoutParams(0, dp(34), 1f))
+        dpiRow.addView(smallButton("+") {
+            scaleDpi = (scaleDpi + 20).coerceAtMost(1000)
+            dpiText.text = "DPI: $scaleDpi"
+        }, LinearLayout.LayoutParams(dp(42), dp(34)))
+        panel.addView(dpiRow, LinearLayout.LayoutParams(-1, dp(40)))
+        val status = label("Chọn mức rồi nhấn ÁP DỤNG", 11f, Color.LTGRAY)
+        panel.addView(status, LinearLayout.LayoutParams(-1, dp(28)))
+        scaleCountdown = status
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun actionButton(text: String, action: () -> Unit) = TextView(this).apply {
+            this.text = text
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(20, 70, 120), dp(8).toFloat())
+            isClickable = true
+            setOnClickListener(action)
+        }
+        actions.addView(actionButton("ÁP DỤNG", {
+            val saved = DisplayScaleController.captureOriginal(this@GameOverlayService)
+            if (!saved.success) {
+                status.text = saved.output
+                return@actionButton
+            }
+            val result = DisplayScaleController.apply(scaleWidth, scaleHeight, scaleDpi)
+            if (!result.success) {
+                status.text = result.output
+                return@actionButton
+            }
+            scalePreviewPending = true
+            startDisplayCountdown(10)
+        }), LinearLayout.LayoutParams(0, dp(38), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        actions.addView(actionButton("GIỮ", {
+            if (scalePreviewPending) DisplayScaleController.keep(this@GameOverlayService)
+            scalePreviewPending = false
+            closeDisplayScalePanel(restore = false)
+        }), LinearLayout.LayoutParams(0, dp(38), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        actions.addView(actionButton("HOÀN TÁC", {
+            closeDisplayScalePanel(restore = true)
+        }), LinearLayout.LayoutParams(0, dp(38), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        panel.addView(actions, LinearLayout.LayoutParams(-1, dp(42)))
+        val params = WindowManager.LayoutParams(
+            dp(310), dp(220), type,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = dp(12)
+            y = dp(72)
+        }
+        scaleRoot = FrameLayout(this).apply { addView(panel, FrameLayout.LayoutParams(-1, -1)) }
+        try {
+            windowManager.addView(scaleRoot, params)
+        } catch (e: Exception) {
+            scaleRoot = null
+            android.widget.Toast.makeText(this, "Không thể mở bảng chỉnh màn hình: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        handler.postDelayed({
+            val current = DisplayScaleController.execute("wm density")
+            val found = Regex("(?:Override|Physical) density:\\s*(\\d+)").find(current.output)
+            if (found != null) {
+                scaleDpi = found.groupValues[1].toInt()
+                dpiText.text = "DPI: $scaleDpi"
+            }
+            val captured = DisplayScaleController.captureOriginal(this@GameOverlayService)
+            if (!captured.success) status.text = captured.output
+        }, 500L)
+    }
+
+    private fun startDisplayCountdown(seconds: Int) {
+        scaleTimeout?.let { handler.removeCallbacks(it) }
+        val endAt = System.currentTimeMillis() + seconds * 1000L
+        val task = object : Runnable {
+            override fun run() {
+                if (!scalePreviewPending) return
+                val left = ((endAt - System.currentTimeMillis() + 999L) / 1000L).toInt()
+                if (left <= 0) {
+                    scaleCountdown?.text = "Đang khôi phục cấu hình cũ…"
+                    val result = DisplayScaleController.restore(this@GameOverlayService)
+                    scalePreviewPending = false
+                    scaleCountdown?.text = result.output
+                    handler.postDelayed({ closeDisplayScalePanel(restore = false) }, 1800L)
+                } else {
+                    scaleCountdown?.text = "Còn $left giây · nhấn GIỮ để xác nhận"
+                    handler.postDelayed(this, 250L)
+                }
+            }
+        }
+        scaleTimeout = task
+        handler.post(task)
+    }
+
+    private fun closeDisplayScalePanel(restore: Boolean) {
+        scaleTimeout?.let { handler.removeCallbacks(it) }
+        scaleTimeout = null
+        if (restore && scalePreviewPending) DisplayScaleController.restore(this)
+        scalePreviewPending = false
+        scaleRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
+        scaleRoot = null
+        scaleCountdown = null
     }
 
     private fun openMouseTweak() {
@@ -667,6 +844,7 @@ class GameOverlayService : Service() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         pingExecutor.shutdownNow()
+        closeDisplayScalePanel(restore = true)
         overlayRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         bubbleRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         actionOverlays.forEach { try { windowManager.removeView(it) } catch (_: Exception) { } }
@@ -677,6 +855,7 @@ class GameOverlayService : Service() {
         removeMappingOverlay()
         closeMappingEditor()
         DisplayScaleController.restore(this)
+        DisplayScaleController.disconnect()
         super.onDestroy()
     }
 
