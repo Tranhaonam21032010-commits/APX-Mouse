@@ -338,7 +338,7 @@ class GameOverlayService : Service() {
                 setOnClickListener {
                     scaleWidth = choice.second
                     scaleHeight = choice.third
-                    status.text = "Đã chọn ${choice.first}"
+                    title.text = "Đã chọn ${choice.first}"
                 }
             }
             presets.addView(button, LinearLayout.LayoutParams(0, dp(36), 1f).apply {
