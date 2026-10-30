@@ -84,12 +84,12 @@ class MainActivity : Activity() {
         addPanel(0f, 0f, 1920f, 1080f, intArrayOf(Color.rgb(4, 8, 19), Color.rgb(8, 18, 38), Color.rgb(4, 9, 20)), 0f)
         addText("APX MOUSE", 54f, 42f, 420f, 66f, 40f, white, true)
         addText("GAMING CONTROL CENTER", 58f, 108f, 420f, 28f, 15f, muted, true)
-        addPanel(1050f, 48f, 280f, 82f, intArrayOf(Color.rgb(20, 55, 96), Color.rgb(10, 28, 52)), 18f)
-        addText("+", 1075f, 60f, 55f, 55f, 34f, blue, true, Gravity.CENTER)
-        addClick(addText("THÊM APP", 1140f, 72f, 170f, 34f, 21f, white, true)) { showAppPicker() }
-        addPanel(1350f, 48f, 250f, 82f, intArrayOf(Color.rgb(20, 48, 86), Color.rgb(12, 27, 53)), 18f)
-        addText("⚙", 1372f, 61f, 52f, 52f, 29f, blue, true, Gravity.CENTER)
-        addClick(addText("CÀI ĐẶT", 1432f, 72f, 150f, 34f, 21f, white, true)) { showSettings() }
+        val addAppButton = addPanel(1650f, 48f, 82f, 82f, intArrayOf(Color.rgb(20, 55, 96), Color.rgb(10, 28, 52)), 18f)
+        addClick(addAppButton) { showAppPicker() }
+        addClick(addText("+", 1650f, 48f, 82f, 82f, 42f, blue, true, Gravity.CENTER)) { showAppPicker() }
+        val settingsButton = addPanel(1760f, 48f, 82f, 82f, intArrayOf(Color.rgb(20, 48, 86), Color.rgb(12, 27, 53)), 18f)
+        addClick(settingsButton) { showSettings() }
+        addClick(addText("⚙", 1760f, 48f, 82f, 82f, 34f, blue, true, Gravity.CENTER)) { showSettings() }
         addPanel(60f, 164f, 1380f, 850f, intArrayOf(Color.rgb(18, 39, 72), Color.rgb(7, 15, 32), Color.rgb(12, 27, 52)), 30f)
         addText("TRÒ CHƠI CỦA BẠN", 112f, 202f, 650f, 48f, 27f, white, true)
         addText("Chọn ứng dụng để mở nhanh · Vuốt ngang để chuyển trang", 114f, 253f, 900f, 34f, 18f, muted, false)
@@ -361,7 +361,9 @@ class MainActivity : Activity() {
         val width = canvas.width.toFloat()
         val height = canvas.height.toFloat()
         if (width <= 0f || height <= 0f) return
-        val scale = maxOf(width / 1920f, height / 1080f)
+        // Fit the complete 1920x1080 hub inside the available screen.
+        // maxOf() cropped the top/bottom on wide displays and pushed controls off-screen.
+        val scale = minOf(width / 1920f, height / 1080f)
         val offsetX = (width - 1920f * scale) / 2f
         val offsetY = (height - 1080f * scale) / 2f
         placements.forEach { item ->
