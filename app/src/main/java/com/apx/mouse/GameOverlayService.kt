@@ -244,50 +244,6 @@ class GameOverlayService : Service() {
         renderedMapping = null
     }
 
-    private fun createAction(symbol: String, label: String, action: () -> Unit): View {
-        val density = resources.displayMetrics.density
-        val size = (48 * density).toInt()
-        return TextView(this).apply {
-            text = symbol
-            textSize = 21f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            background = circle(Color.rgb(22, 45, 76), size / 2f, Color.rgb(64, 145, 255), (1.5f * density).toInt())
-            elevation = 7 * density
-            contentDescription = label
-            isClickable = true
-            setOnClickListener { action() }
-        }
-    }
-
-    private fun setFanOpen(open: Boolean) {
-        if (fanOpen == open) return
-        fanOpen = open
-        val root = overlayRoot ?: return
-        for (index in 0 until minOf(3, root.childCount)) {
-            val item = root.getChildAt(index)
-            item.animate().cancel()
-            if (open) {
-                item.visibility = View.VISIBLE
-                item.alpha = 0f
-                item.scaleX = 0.25f
-                item.scaleY = 0.25f
-                item.animate().alpha(1f).scaleX(1f).scaleY(1f)
-                    .setStartDelay(index * 35L).setDuration(180L).start()
-            } else {
-                item.animate().alpha(0f).scaleX(0.25f).scaleY(0.25f)
-                    .setStartDelay(0L).setDuration(120L)
-                    .withEndAction { item.visibility = View.GONE }.start()
-            }
-        }
-    }
-
-    private fun openMappingEditor() {
-        setFanOpen(false)
-        startActivity(Intent(this, MappingEditor::class.java)
-            .putExtra(MappingEditor.EXTRA_GAME_PACKAGE, gamePackage)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    }
 
     private fun currentForegroundPackage(): String? {
         val usage = getSystemService(USAGE_STATS_SERVICE) as UsageStatsManager
