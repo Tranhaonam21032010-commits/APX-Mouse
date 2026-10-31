@@ -35,6 +35,10 @@ import org.json.JSONObject
 
 class GameOverlayService : Service() {
     private val handler = Handler(Looper.getMainLooper())
+    // UsageEvents queries can be relatively expensive; never run them on the UI thread.
+    private val monitorExecutor = Executors.newSingleThreadExecutor()
+    private val foregroundCheckInProgress = AtomicBoolean(false)
+    private val serviceActive = AtomicBoolean(true)
     private lateinit var windowManager: WindowManager
     private var overlayRoot: FrameLayout? = null
     private var bubbleRoot: FrameLayout? = null
@@ -47,7 +51,7 @@ class GameOverlayService : Service() {
     private var editorSelected = -1
     private var editorGamePackage = ""
     private var editorCanvas: View? = null
-    private var gamePackage: String = ""
+    @Volatile private var gamePackage: String = ""
     private var lastForegroundPackage: String? = null
     private var lastUsageEventTime: Long = 0L
     private var gameActivityDestroyedAt: Long? = null
@@ -68,29 +72,43 @@ class GameOverlayService : Service() {
 
     private val monitor = object : Runnable {
         override fun run() {
+            if (!serviceActive.get()) return
             if (!hasUsageAccess() || !android.provider.Settings.canDrawOverlays(this@GameOverlayService)) {
                 stopSelf()
                 return
             }
-            val foreground = currentForegroundPackage()
-            // Keep the foreground service alive while the player visits Home or another app.
-            // The overlay is hidden outside the selected game and reappears when that game resumes.
-            val inGame = foreground == gamePackage
-            if (inGame) outsideGameSince = null
-            if (!inGame && scalePreviewPending) closeDisplayScalePanel(restore = true)
-            scaleRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
-            mouseTweakRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
-            overlayRoot?.visibility = if (inGame && isStatsEnabled()) View.VISIBLE else View.GONE
-            bubbleRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
-            if (!inGame) setFanOpen(false)
-            updateMappingOverlay(inGame)
-            if (inGame && isStatsEnabled()) {
-                updateStats()
-            } else {
-                // Telemetry is intentionally idle while the game is in background.
+            // Do not overlap UsageEvents scans. Their results are handed back to the main
+            // thread before any WindowManager or View state is touched.
+            if (!foregroundCheckInProgress.compareAndSet(false, true)) {
+                handler.postDelayed(this, GAME_POLL_INTERVAL_MS)
+                return
             }
-            // Keep foreground detection responsive in-game, but reduce background wakeups.
-            handler.postDelayed(this, if (inGame) GAME_POLL_INTERVAL_MS else BACKGROUND_POLL_INTERVAL_MS)
+            try {
+                monitorExecutor.execute {
+                    val foreground = currentForegroundPackage()
+                    handler.post {
+                        foregroundCheckInProgress.set(false)
+                        if (!serviceActive.get()) return@post
+
+                        // Keep the service alive while the player visits Home or another app.
+                        val inGame = foreground == gamePackage
+                        if (inGame) outsideGameSince = null
+                        if (!inGame && scalePreviewPending) closeDisplayScalePanel(restore = true)
+                        scaleRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
+                        mouseTweakRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
+                        overlayRoot?.visibility = if (inGame && isStatsEnabled()) View.VISIBLE else View.GONE
+                        bubbleRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
+                        if (!inGame) setFanOpen(false)
+                        updateMappingOverlay(inGame)
+                        if (inGame && isStatsEnabled()) updateStats()
+
+                        // Poll more slowly outside the selected game to reduce wakeups.
+                        handler.postDelayed(this, if (inGame) GAME_POLL_INTERVAL_MS else BACKGROUND_POLL_INTERVAL_MS)
+                    }
+                }
+            } catch (_: java.util.concurrent.RejectedExecutionException) {
+                foregroundCheckInProgress.set(false)
+            }
         }
     }
 
@@ -996,7 +1014,9 @@ class GameOverlayService : Service() {
     }
 
     override fun onDestroy() {
+        serviceActive.set(false)
         handler.removeCallbacksAndMessages(null)
+        monitorExecutor.shutdownNow()
         pingExecutor.shutdownNow()
         closeDisplayScalePanel(restore = true)
         closeMouseTweak()
