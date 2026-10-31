@@ -8,6 +8,10 @@ android {
     namespace = "com.apx.mouse"
     compileSdk = 35
 
+    buildFeatures {
+        aidl = true
+    }
+
     defaultConfig {
         applicationId = "com.apx.mouse"
         minSdk = 24
