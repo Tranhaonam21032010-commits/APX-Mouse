@@ -14,6 +14,8 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Switch
+import android.widget.Spinner
+import android.widget.ArrayAdapter
 
 class MouseTweakActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("apx_mouse", MODE_PRIVATE) }
@@ -23,6 +25,8 @@ class MouseTweakActivity : Activity() {
     private var cursorStyle = 0
     private var cursorColor = 0
     private var rainbow = false
+    // Software processing cap; does not change the physical HID report rate.
+    private var mouseEventRate = 0
     private lateinit var valueX: TextView
     private lateinit var valueY: TextView
 
@@ -36,6 +40,7 @@ class MouseTweakActivity : Activity() {
         cursorStyle = prefs.getInt("mouse_style_$suffix", 0)
         cursorColor = prefs.getInt("mouse_color_$suffix", 0)
         rainbow = prefs.getBoolean("mouse_rainbow_$suffix", false)
+        mouseEventRate = prefs.getInt("mouse_event_rate_$suffix", 0)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -85,10 +90,22 @@ class MouseTweakActivity : Activity() {
             isChecked = rainbow
             setOnCheckedChangeListener { _, checked -> rainbow = checked }
         })
-        content.addView(section("TÍNH NĂNG PHẦN CỨNG"))
-        content.addView(text("Polling rate: chưa đọc được thông số USB HID trên thiết bị này nên chưa cho phép chỉnh.", 14f, Color.LTGRAY))
-        content.addView(text("Mouse Lock: chưa hỗ trợ khóa con trỏ và chuyển chuyển động chuột thành camera input trong game. Không bật giả lập.", 14f, Color.rgb(255, 205, 130)))
-        content.addView(text("Lưu ý: X/Y, kiểu và màu hiện được lưu theo từng game. Chúng chưa tác động vào chuột hệ thống cho đến khi có bộ xử lý input tương thích.", 13f, Color.LTGRAY))
+        content.addView(section("TẦN SUẤT XỬ LÝ SỰ KIỆN CHUỘT"))
+        content.addView(text("Chọn giới hạn xử lý nội bộ của APX. Tùy chọn này không thay đổi polling rate vật lý của chuột USB/Bluetooth.", 13f, Color.LTGRAY))
+        val eventRateSpinner = Spinner(this)
+        val rateOptions = listOf("Không giới hạn", "125 Hz", "250 Hz", "500 Hz")
+        eventRateSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, rateOptions)
+        eventRateSpinner.setSelection(when (mouseEventRate) { 125 -> 1; 250 -> 2; 500 -> 3; else -> 0 })
+        eventRateSpinner.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                mouseEventRate = listOf(0, 125, 250, 500)[position]
+            }
+        })
+        content.addView(eventRateSpinner)
+        content.addView(section("MOUSE LOCK"))
+        content.addView(text("GG Mouse có dấu vết native EventGrabber để bắt sự kiện thiết bị và chuyển tiếp cho game. APX chưa có Input Engine tương đương, vì vậy chưa bật khóa chuột giả.", 14f, Color.rgb(255, 205, 130)))
+        content.addView(text("Giới hạn Hz chỉ có tác dụng khi Input Engine gọi MouseEventRateLimiter. Nó chưa thay đổi sự kiện chuột trực tiếp ở phiên bản hiện tại.", 13f, Color.LTGRAY))
 
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
         buttons.addView(button("Hủy") { finish() })
@@ -99,6 +116,7 @@ class MouseTweakActivity : Activity() {
                 .putInt("mouse_style_$suffix", cursorStyle)
                 .putInt("mouse_color_$suffix", cursorColor)
                 .putBoolean("mouse_rainbow_$suffix", rainbow)
+                .putInt("mouse_event_rate_$suffix", mouseEventRate)
                 .apply()
             finish()
         })
