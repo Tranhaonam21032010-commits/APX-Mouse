@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import rikka.shizuku.Shizuku
@@ -91,7 +92,20 @@ class MainActivity : Activity() {
             startActivity(Intent(this, MappingEditor::class.java))
         }
 
-        setContentView(root)
+        val probeReport = TextView(this).apply {
+            text = "Chưa chạy kiểm tra thiết bị."
+            textSize = 12f
+            setTextColor(Color.LTGRAY)
+            setPadding(12, 18, 12, 24)
+            setTextIsSelectable(true)
+        }
+        root.addView(probeReport)
+        addButton("BETA: QUÉT CHUỘT / BÀN PHÍM") {
+            probeReport.text = DeviceCapabilityProbe.run(this)
+        }
+
+        val scroll = ScrollView(this).apply { addView(root) }
+        setContentView(scroll)
         Shizuku.addRequestPermissionResultListener(permissionListener)
         Shizuku.addBinderReceivedListener(binderReceivedListener)
         Shizuku.addBinderDeadListener(binderDeadListener)
