@@ -87,8 +87,7 @@ class GameOverlayService : Service() {
             if (inGame && isStatsEnabled()) {
                 updateStats()
             } else {
-                // Do not run battery queries or network probes while the game is in background.
-                handler.removeCallbacks(::startNetworkPingIfDue)
+                // Telemetry is intentionally idle while the game is in background.
             }
             // Keep foreground detection responsive in-game, but reduce background wakeups.
             handler.postDelayed(this, if (inGame) GAME_POLL_INTERVAL_MS else BACKGROUND_POLL_INTERVAL_MS)
