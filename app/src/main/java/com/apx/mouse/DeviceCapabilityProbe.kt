@@ -40,7 +40,7 @@ object DeviceCapabilityProbe {
             report.appendLine("  id=${device.id}, descriptor=${device.descriptor}")
             report.appendLine("  vendorId=${device.vendorId}, productId=${device.productId}")
             report.appendLine("  sources=${sources.joinToString().ifBlank { "UNKNOWN" }}")
-            report.appendLine("  virtual=${device.isVirtual}, external=${device.isExternal}")
+            report.appendLine("  virtual=${device.isVirtual}, external=${if (android.os.Build.VERSION.SDK_INT >= 29) device.isExternal else "unknown (API < 29)"}")
             report.appendLine("  motionRanges=${device.motionRanges.joinToString { it.axis.toString() }}")
             report.appendLine()
         }
