@@ -84,8 +84,14 @@ class GameOverlayService : Service() {
             bubbleRoot?.visibility = if (inGame && !manuallyHidden) View.VISIBLE else View.GONE
             if (!inGame) setFanOpen(false)
             updateMappingOverlay(inGame)
-            updateStats()
-            handler.postDelayed(this, 1000L)
+            if (inGame && isStatsEnabled()) {
+                updateStats()
+            } else {
+                // Do not run battery queries or network probes while the game is in background.
+                handler.removeCallbacks(::startNetworkPingIfDue)
+            }
+            // Keep foreground detection responsive in-game, but reduce background wakeups.
+            handler.postDelayed(this, if (inGame) GAME_POLL_INTERVAL_MS else BACKGROUND_POLL_INTERVAL_MS)
         }
     }
 
@@ -800,14 +806,22 @@ class GameOverlayService : Service() {
         updateMappingOverlay(true)
     }
 
+    private var cachedBatteryText = "--"
+    private var lastBatteryReadAt = 0L
+
     private fun updateStats() {
-        val batteryIntent = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        val level = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
-        val scale = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
-        val percent = if (level >= 0 && scale > 0) (level * 100 / scale) else -1
-        val batteryText = if (percent >= 0) "$percent%" else "--"
+        val now = System.currentTimeMillis()
+        // Battery level changes slowly; querying the sticky broadcast every frame is wasteful.
+        if (now - lastBatteryReadAt >= BATTERY_REFRESH_INTERVAL_MS) {
+            val batteryIntent = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val level = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
+            val percent = if (level >= 0 && scale > 0) (level * 100 / scale) else -1
+            cachedBatteryText = if (percent >= 0) "$percent%" else "--"
+            lastBatteryReadAt = now
+        }
         startNetworkPingIfDue()
-        statsView?.text = "PIN $batteryText    PING $networkPingText    FPS --"
+        statsView?.text = "PIN $cachedBatteryText    PING $networkPingText    FPS --"
     }
 
     private fun startNetworkPingIfDue() {
@@ -1004,6 +1018,10 @@ class GameOverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        private const val GAME_POLL_INTERVAL_MS = 1_000L
+        private const val BACKGROUND_POLL_INTERVAL_MS = 4_000L
+        private const val BATTERY_REFRESH_INTERVAL_MS = 10_000L
+
         const val EXTRA_GAME_PACKAGE = "extra_game_package"
         private const val CHANNEL_ID = "apx_game_overlay"
         private const val NOTIFICATION_ID = 4102
