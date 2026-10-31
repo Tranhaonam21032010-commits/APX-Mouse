@@ -853,11 +853,12 @@ class GameOverlayService : Service() {
                 try {
                     if (!serviceActive.get()) return@execute
                     // General Internet latency to Cloudflare DNS, not game-server RTT.
-                    process = ProcessBuilder("ping", "-c", "1", "-W", "2", "1.1.1.1")
+                    val pingProcess = ProcessBuilder("ping", "-c", "1", "-W", "2", "1.1.1.1")
                         .redirectErrorStream(true).start()
+                    process = pingProcess
                     // Bound the worker even if the device's ping binary ignores -W.
-                    if (process.waitFor(3, TimeUnit.SECONDS)) {
-                        val output = process.inputStream.bufferedReader().use { it.readText() }
+                    if (pingProcess.waitFor(3, TimeUnit.SECONDS)) {
+                        val output = pingProcess.inputStream.bufferedReader().use { it.readText() }
                         val marker = "time="
                         val pos = output.indexOf(marker)
                         if (pos >= 0) {
