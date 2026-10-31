@@ -130,10 +130,20 @@ class MappingEditor : Activity() {
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (selectedIndex in points.indices && event.action == MotionEvent.ACTION_BUTTON_PRESS) {
+            // actionButton identifies the button that changed; buttonState is a fallback
+            // for devices that do not populate actionButton consistently.
+            val changedButton = event.actionButton
             val key = when {
-                event.buttonState and MotionEvent.BUTTON_PRIMARY != 0 -> KeyEvent.KEYCODE_BUTTON_1
-                event.buttonState and MotionEvent.BUTTON_SECONDARY != 0 -> KeyEvent.KEYCODE_BUTTON_2
-                event.buttonState and MotionEvent.BUTTON_TERTIARY != 0 -> KeyEvent.KEYCODE_BUTTON_3
+                changedButton == MotionEvent.BUTTON_PRIMARY ||
+                    event.buttonState and MotionEvent.BUTTON_PRIMARY != 0 -> KeyEvent.KEYCODE_BUTTON_1
+                changedButton == MotionEvent.BUTTON_SECONDARY ||
+                    event.buttonState and MotionEvent.BUTTON_SECONDARY != 0 -> KeyEvent.KEYCODE_BUTTON_2
+                changedButton == MotionEvent.BUTTON_TERTIARY ||
+                    event.buttonState and MotionEvent.BUTTON_TERTIARY != 0 -> KeyEvent.KEYCODE_BUTTON_3
+                changedButton == MotionEvent.BUTTON_BACK ||
+                    event.buttonState and MotionEvent.BUTTON_BACK != 0 -> KeyEvent.KEYCODE_BUTTON_4
+                changedButton == MotionEvent.BUTTON_FORWARD ||
+                    event.buttonState and MotionEvent.BUTTON_FORWARD != 0 -> KeyEvent.KEYCODE_BUTTON_5
                 else -> KeyEvent.KEYCODE_UNKNOWN
             }
             if (key != KeyEvent.KEYCODE_UNKNOWN) {
@@ -149,6 +159,8 @@ class MappingEditor : Activity() {
         KeyEvent.KEYCODE_BUTTON_1 -> "CHUỘT TRÁI"
         KeyEvent.KEYCODE_BUTTON_2 -> "CHUỘT PHẢI"
         KeyEvent.KEYCODE_BUTTON_3 -> "CHUỘT GIỮA"
+        KeyEvent.KEYCODE_BUTTON_4 -> "CHUỘT NÚT 4"
+        KeyEvent.KEYCODE_BUTTON_5 -> "CHUỘT NÚT 5"
         else -> KeyEvent.keyCodeToString(code).removePrefix("KEYCODE_")
     }
 
