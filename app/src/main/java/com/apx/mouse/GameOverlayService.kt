@@ -29,6 +29,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.text.InputType
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -814,13 +815,13 @@ class GameOverlayService : Service() {
         android.widget.Toast.makeText(this, "Đã lưu \${editorPoints.size} nút", android.widget.Toast.LENGTH_SHORT).show()
     }
 
-    private fun closeMappingEditor() {
+    private fun closeMappingEditor(refreshOverlay: Boolean = true) {
         editorRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         editorRoot = null
         editorCanvas = null
         renderedMapping = null
-        bubbleRoot?.visibility = View.VISIBLE
-        updateMappingOverlay(true)
+        if (serviceActive.get()) bubbleRoot?.visibility = View.VISIBLE
+        if (refreshOverlay && serviceActive.get()) updateMappingOverlay(true)
     }
 
     private var cachedBatteryText = "--"
@@ -845,26 +846,38 @@ class GameOverlayService : Service() {
         val now = System.currentTimeMillis()
         if (now - lastPingStartedAt < 5000L || !pingInProgress.compareAndSet(false, true)) return
         lastPingStartedAt = now
-        pingExecutor.execute {
-            var result = "--"
-            try {
-                // General Internet latency to Cloudflare DNS, not game-server RTT.
-                val process = ProcessBuilder("ping", "-c", "1", "-W", "2", "1.1.1.1").redirectErrorStream(true).start()
-                val output = process.inputStream.bufferedReader().use { it.readText() }
-                val marker = "time="
-                val pos = output.indexOf(marker)
-                if (pos >= 0) {
-                    val number = output.substring(pos + marker.length).takeWhile { it.isDigit() || it == '.' }
-                    val value = number.toDoubleOrNull()
-                    if (value != null) result = value.toInt().toString() + "ms"
+        try {
+            pingExecutor.execute {
+                var result = "--"
+                var process: Process? = null
+                try {
+                    if (!serviceActive.get()) return@execute
+                    // General Internet latency to Cloudflare DNS, not game-server RTT.
+                    process = ProcessBuilder("ping", "-c", "1", "-W", "2", "1.1.1.1")
+                        .redirectErrorStream(true).start()
+                    // Bound the worker even if the device's ping binary ignores -W.
+                    if (process.waitFor(3, TimeUnit.SECONDS)) {
+                        val output = process.inputStream.bufferedReader().use { it.readText() }
+                        val marker = "time="
+                        val pos = output.indexOf(marker)
+                        if (pos >= 0) {
+                            val number = output.substring(pos + marker.length).takeWhile { it.isDigit() || it == '.' }
+                            val value = number.toDoubleOrNull()
+                            if (value != null) result = value.toInt().toString() + "ms"
+                        }
+                    } else {
+                        process.destroyForcibly()
+                    }
+                } catch (_: Exception) {
+                    result = "--"
+                } finally {
+                    process?.destroy()
+                    networkPingText = result
+                    pingInProgress.set(false)
                 }
-                process.destroy()
-            } catch (_: Exception) {
-                result = "--"
-            } finally {
-                networkPingText = result
-                pingInProgress.set(false)
             }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            pingInProgress.set(false)
         }
     }
     private fun updateMappingOverlay(inGame: Boolean) {
@@ -1028,7 +1041,7 @@ class GameOverlayService : Service() {
         bubbleRoot = null
         statsView = null
         removeMappingOverlay()
-        closeMappingEditor()
+        closeMappingEditor(refreshOverlay = false)
         DisplayScaleController.restore(this)
         DisplayScaleController.disconnect()
         super.onDestroy()
