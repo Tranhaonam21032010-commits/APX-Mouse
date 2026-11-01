@@ -7,6 +7,7 @@ import android.os.SystemClock
 import rikka.shizuku.Shizuku
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Shizuku shell backend for discrete taps and serialized multi-pointer touch frames.
