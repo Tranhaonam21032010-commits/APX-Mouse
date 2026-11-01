@@ -637,7 +637,7 @@ class MainActivity : Activity() {
     private fun addDynamicPanel(x: Float, y: Float, width: Float, height: Float, colors: IntArray, radius: Float): View {
         val view = View(this)
         dynamicViews += view
-        backgroundViews[view] = Pair(colors, radius)
+        backgroundViews[view] = PanelStyle(colors, radius)
         view.background = gradient(colors, radius)
         addAt(view, x, y, width, height)
         return view
