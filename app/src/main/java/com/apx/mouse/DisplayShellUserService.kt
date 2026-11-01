@@ -158,10 +158,15 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
         }
 
         var completion = "Phiên đọc input đã kết thúc"
+        val diagnosticOutput = ArrayDeque<String>()
         try {
             process.inputStream.bufferedReader().use { reader ->
                 while (true) {
                     val line = reader.readLine() ?: break
+                    if (!line.contains(": EV_")) {
+                        if (diagnosticOutput.size >= 8) diagnosticOutput.removeFirst()
+                        diagnosticOutput.addLast(line.take(300))
+                    }
                     batch.add(line.take(512))
                     val now = SystemClock.uptimeMillis()
                     if (batch.size >= 32 || now - lastFlushAt >= 16L) flushBatch()
@@ -169,7 +174,12 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
             }
             flushBatch()
             val exitCode = process.waitFor()
-            completion = if (exitCode == 0) "getevent đã dừng" else "getevent kết thúc với mã $exitCode"
+            completion = if (exitCode == 0) {
+                "getevent đã dừng"
+            } else {
+                val detail = diagnosticOutput.joinToString(" | ").ifBlank { "Không có stderr chi tiết; kiểm tra quyền truy cập /dev/input." }
+                "getevent kết thúc với mã $exitCode: $detail"
+            }
         } catch (e: Exception) {
             completion = "Lỗi đọc input: ${e.message ?: e.javaClass.simpleName}"
         } finally {
