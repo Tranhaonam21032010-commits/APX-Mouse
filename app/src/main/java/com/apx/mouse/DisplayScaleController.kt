@@ -169,12 +169,14 @@ object DisplayScaleController {
         } catch (e: Exception) { Result(false, "Lỗi đọc input: ${e.message}") }
     }
 
-    fun captureInputEvents(seconds: Int = 5): Result {
+    fun captureInputEvents(seconds: Int = 5, eventPaths: Array<String>): Result {
         val service = shell
         if (service == null || service.asBinder()?.isBinderAlive != true)
             return Result(false, bindError ?: "Shizuku UserService chưa sẵn sàng")
         return try {
-            val output = service.captureInputEvents(seconds.coerceIn(2, 8)).trim()
+            if (eventPaths.isEmpty() || eventPaths.size > 8)
+                return Result(false, "Cần chọn từ 1 đến 8 thiết bị input")
+            val output = service.captureInputEvents(seconds.coerceIn(2, 8), eventPaths).trim()
             Result(!output.startsWith("ERROR:"), output)
         } catch (e: Exception) { Result(false, "Lỗi đọc sự kiện: ${e.message}") }
     }
