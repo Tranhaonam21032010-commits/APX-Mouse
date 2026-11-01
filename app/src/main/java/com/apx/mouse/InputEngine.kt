@@ -269,8 +269,8 @@ class InputEngine(
     }
 
     private fun normalizedPoint(x: Float, y: Float): Pair<Float, Float> {
-        val width = currentConfig.screenWidth.coerceAtLeast(1).toFloat()
-        val height = currentConfig.screenHeight.coerceAtLeast(1).toFloat()
+        val width = (currentConfig.screenWidth - 1).coerceAtLeast(0).toFloat()
+        val height = (currentConfig.screenHeight - 1).coerceAtLeast(0).toFloat()
         return x.coerceIn(0f, 1f) * width to y.coerceIn(0f, 1f) * height
     }
 
