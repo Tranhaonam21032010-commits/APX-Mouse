@@ -60,10 +60,10 @@ object ShizukuInputCapabilityProbe {
             Result(
                 connected = true,
                 permissionGranted = true,
-                shellIdentity = identity.output.trim().ifBlank { "unknown (exit ${identity.exitCode})" },
+                shellIdentity = identity.output.trim().ifBlank { "unknown" },
                 inputCommandAvailable = available,
                 inputHelp = help,
-                error = listOf(identity.error, inputCheck.error).filterNotNull().joinToString("; ").ifBlank { null }
+                error = listOf(identity, inputCheck).filter { !it.success }.joinToString("; ") { it.output }.ifBlank { null }
             )
         } catch (e: Exception) {
             Result(true, true, null, null, null, e.message ?: e.javaClass.simpleName)
