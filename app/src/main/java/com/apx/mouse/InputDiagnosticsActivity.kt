@@ -3,6 +3,7 @@ package com.apx.mouse
 import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
+import android.os.Build
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -30,7 +31,14 @@ class InputDiagnosticsActivity : Activity() {
             setPadding(0, 8, 0, 8)
         }
         root.addView(text("APX INPUT DIAGNOSTICS", 20f, Color.WHITE))
-        root.addView(text("Shizuku · Android 13 · Vivo Y21s", 14f, Color.LTGRAY))
+        root.addView(text(
+            "Thiết bị: ${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+            14f, Color.LTGRAY
+        ))
+        root.addView(text(
+            "Ghi input chỉ chạy khi bạn chủ động bấm. Dữ liệu có thể chứa mã phím/chuột; không ghi khi nhập mật khẩu hoặc thông tin riêng tư.",
+            12f, Color.rgb(255, 205, 130)
+        ))
         status = text("Đang kiểm tra Shizuku…", 14f, Color.YELLOW)
         root.addView(status)
         root.addView(Button(this).apply {
