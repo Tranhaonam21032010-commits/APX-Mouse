@@ -450,10 +450,14 @@ class GameOverlayService : Service() {
                     evdevParser.reset()
                     inputSessionActive = true
 
+                    // Set before the Binder call: getevent can exit and report its callback
+                    // before startInputCapture() returns to this worker.
+                    inputCaptureRunning = true
                     val result = DisplayScaleController.startInputCapture(
                         paths.toTypedArray(), inputEventListener
                     )
                     if (!result.success) {
+                        inputCaptureRunning = false
                         inputSessionActive = false
                         inputEngine = null
                         inputBackend = null
@@ -462,9 +466,9 @@ class GameOverlayService : Service() {
                         postInputStatus(result.output)
                         return@execute
                     }
-                    inputCaptureRunning = true
                     postInputStatus("Đã bật nhận chuột / bàn phím cho phiên game.")
                 } catch (e: Exception) {
+                    inputCaptureRunning = false
                     inputSessionActive = false
                     inputEngine = null
                     inputBackend = null
