@@ -13,7 +13,6 @@ class TouchFrameStateTest {
 
         val up = state.up(1)!!
         assertEquals(TouchFrameState.ACTION_UP, up.action)
-        assertEquals(1, state.activeCount())
         assertEquals(0, state.activeCount())
     }
 
