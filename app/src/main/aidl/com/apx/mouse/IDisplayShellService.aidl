@@ -2,6 +2,8 @@ package com.apx.mouse;
 
 import com.apx.mouse.IInputEventListener;
 
+import com.apx.mouse.IInputEventListener;
+
 interface IDisplayShellService {
     void destroy();
     String inputInventory();
