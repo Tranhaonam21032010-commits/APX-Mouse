@@ -35,8 +35,8 @@ class TouchFrameStateTest {
         state.down(2, 20f, 20f)
         val move = state.move(2, 99f, 101f)!!
         assertEquals(TouchFrameState.ACTION_MOVE, move.action)
-        assertEquals(10f, move.pointers[0].x)
-        assertEquals(99f, move.pointers[1].x)
+        assertEquals(10f, move.pointers[0].x, 0f)
+        assertEquals(99f, move.pointers[1].x, 0f)
         assertNull(state.move(3, 1f, 1f))
     }
 
