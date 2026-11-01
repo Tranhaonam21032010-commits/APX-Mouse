@@ -130,6 +130,16 @@ class MainActivity : Activity() {
     private fun navigateTo(page: UiPage) {
         currentPage = page
         renderCurrentPage()
+        val fade = prefs.getString("app_transition", "Trượt") == "Mờ dần"
+        canvas.animate().cancel()
+        canvas.alpha = if (fade) 0f else 0.92f
+        canvas.translationX = if (fade) 0f else 22f
+        canvas.animate()
+            .alpha(1f)
+            .translationX(0f)
+            .setDuration(PAGE_TRANSITION_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
     }
 
     private fun renderCurrentPage() {
@@ -283,8 +293,7 @@ class MainActivity : Activity() {
             val action = {
                 when (index) {
                     0 -> toast("Giao diện Gaming đang được sử dụng")
-                    1 -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        android.net.Uri.parse("package:$packageName")))
+                    1 -> showPermissionManager()
                     2 -> {
                         prefs.edit().putBoolean("neon_enabled",
                             !prefs.getBoolean("neon_enabled", true)).apply()
@@ -310,6 +319,28 @@ class MainActivity : Activity() {
             addClick(value, action)
         }
         pageButton("CHẨN ĐOÁN CHUỘT / BÀN PHÍM", 710f, 920f, 500f, 64f) { startActivity(Intent(this, InputDiagnosticsActivity::class.java)) }
+    }
+
+    private fun showPermissionManager() {
+        val options = arrayOf(
+            "Hiển thị trên ứng dụng khác",
+            "Truy cập dữ liệu sử dụng",
+            "Quyền Shizuku"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Quản lý quyền APX MOUSE")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> startActivity(Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:$packageName")
+                    ))
+                    1 -> startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    2 -> requestShizukuPermission()
+                }
+            }
+            .setNegativeButton("Đóng", null)
+            .show()
     }
 
     private fun buildAppDetailsPage() {
@@ -595,6 +626,34 @@ class MainActivity : Activity() {
     private fun addClick(view: View, action: () -> Unit) {
         view.isClickable = true
         view.isFocusable = true
+        view.setOnTouchListener { target, event ->
+            if (prefs.getBoolean("neon_enabled", true)) {
+                val intensity = prefs.getString("neon_strength", "Trung bình")
+                val scale = when (intensity) {
+                    "Thấp" -> 0.99f
+                    "Cao" -> 0.95f
+                    else -> 0.97f
+                }
+                val alpha = when (intensity) {
+                    "Thấp" -> 0.93f
+                    "Cao" -> 0.76f
+                    else -> 0.85f
+                }
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        target.animate().cancel()
+                        target.animate().scaleX(scale).scaleY(scale).alpha(alpha)
+                            .translationZ(8f).setDuration(55L).start()
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        target.animate().cancel()
+                        target.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                            .translationZ(0f).setDuration(110L).start()
+                    }
+                }
+            }
+            false
+        }
         view.setOnClickListener { action() }
     }
 
