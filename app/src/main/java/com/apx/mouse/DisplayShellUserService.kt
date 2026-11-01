@@ -110,6 +110,15 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
                 return "ERROR: Không khởi động được getevent: ${e.message ?: e.javaClass.simpleName}"
             }
 
+            // getevent commonly exits immediately when Shizuku cannot read a selected
+            // node. Detect that here so the UI does not briefly report a false "OK".
+            if (waitForProcessExit(process, 160L)) {
+                val diagnostic = runCatching {
+                    process.inputStream.bufferedReader().use { it.readText().take(2_000) }
+                }.getOrDefault("")
+                return InputCaptureStartup.failure(process.exitValue(), diagnostic)
+            }
+
             inputCaptureProcess = process
             val reader = Thread(
                 { readInputCapture(process, listener) },
