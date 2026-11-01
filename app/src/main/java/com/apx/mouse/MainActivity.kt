@@ -55,6 +55,7 @@ class MainActivity : Activity() {
     private lateinit var shizukuStatus: TextView
     private lateinit var shizukuDot: View
     private lateinit var shizukuButton: TextView
+    private lateinit var rootAccessStatus: TextView
 
     private val prefs by lazy { getSharedPreferences("apx_mouse", MODE_PRIVATE) }
     private val selectedPackages by lazy {
@@ -120,10 +121,11 @@ class MainActivity : Activity() {
         addPanel(1515f, 365f, 310f, 86f, intArrayOf(Color.rgb(24, 105, 133), Color.rgb(12, 54, 83)), 18f)
         shizukuButton = addText("Kết nối Shizuku", 1530f, 388f, 280f, 40f, 19f, white, true, Gravity.CENTER)
         addClick(shizukuButton) { requestShizukuPermission() }
-        addText("ROOT ACCESS", 1518f, 540f, 300f, 32f, 15f, muted, true)
+        addText("KIỂU QUYỀN SHIZUKU", 1518f, 540f, 300f, 32f, 15f, muted, true)
         addPanel(1515f, 585f, 310f, 86f, intArrayOf(Color.rgb(37, 53, 82), Color.rgb(17, 28, 50)), 18f)
-        addClick(addText("DÙNG ROOT", 1530f, 608f, 280f, 40f, 19f, muted, true, Gravity.CENTER)) { toast("Chế độ Root chưa được tích hợp") }
-        addText("Shizuku và Root là hai phương thức cấp quyền riêng biệt.", 1518f, 710f, 300f, 72f, 14f, muted, false)
+        rootAccessStatus = addText(shizukuIdentityLabel(), 1530f, 608f, 280f, 40f, 15f, muted, true, Gravity.CENTER)
+        addClick(rootAccessStatus) { showShizukuIdentityInfo() }
+        addText("UID 0 = Root · UID 2000 = ADB shell. APX chỉ hiển thị phiên hiện tại, không tự cấp quyền Root.", 1518f, 710f, 300f, 72f, 13f, muted, false)
         renderGameSpace()
     }
 
@@ -797,8 +799,37 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun shizukuIdentityLabel(): String {
+        if (!runCatching { Shizuku.pingBinder() }.getOrDefault(false)) return "CHƯA KẾT NỐI"
+        return when (runCatching { Shizuku.getUid() }.getOrNull()) {
+            0 -> "ROOT · UID 0"
+            2000 -> "ADB SHELL · UID 2000"
+            else -> "ĐÃ KẾT NỐI · UID KHÁC"
+        }
+    }
+
+    private fun showShizukuIdentityInfo() {
+        if (!Shizuku.pingBinder()) {
+            toast("Shizuku chưa chạy. Hãy kết nối Shizuku trước.")
+            return
+        }
+        val uid = runCatching { Shizuku.getUid() }.getOrNull()
+        val message = when (uid) {
+            0 -> "Shizuku hiện chạy với UID 0 (Root)."
+            2000 -> "Shizuku hiện chạy với UID 2000 (ADB shell). Đây không phải Root; một số quyền hệ thống vẫn bị giới hạn."
+            null -> "Không đọc được UID của phiên Shizuku."
+            else -> "Phiên Shizuku hiện có UID $uid."
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Kiểu quyền hiện tại")
+            .setMessage(message + "\nAPX MOUSE không tự nâng quyền và không tự bật Root.")
+            .setPositiveButton("Đóng", null)
+            .show()
+    }
+
     private fun updateShizukuStatus() {
         if (!::shizukuStatus.isInitialized) return
+        if (::rootAccessStatus.isInitialized) rootAccessStatus.text = shizukuIdentityLabel()
         val running = Shizuku.pingBinder()
         val granted = running && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         when {
