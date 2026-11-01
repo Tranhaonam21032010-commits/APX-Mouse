@@ -33,9 +33,15 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
         )
     }
 
-    override fun captureInputEvents(seconds: Int): String {
+    override fun captureInputEvents(seconds: Int, eventPaths: Array<out String>): String {
+        val paths = eventPaths.map { it.trim() }.distinct()
+        if (paths.isEmpty() || paths.size > 8 ||
+            paths.any { !Regex("/dev/input/event[0-9]{1,3}").matches(it) }
+        ) return "ERROR: Chọn từ 1 đến 8 thiết bị input hợp lệ"
         val duration = seconds.coerceIn(2, 8)
-        return runDiagnostic("timeout ${duration}s getevent -lt 2>&1", (duration + 2).toLong())
+        val command = (listOf("timeout", "${duration}s", "getevent", "-lt") + paths)
+            .joinToString(" ") + " 2>&1"
+        return runDiagnostic(command, (duration + 2).toLong())
     }
 
     private fun runDiagnostic(command: String, timeoutSeconds: Long): String {
