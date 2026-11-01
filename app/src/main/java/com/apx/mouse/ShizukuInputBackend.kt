@@ -39,6 +39,7 @@ class ShizukuInputBackend(
     // Accessed only on executor to preserve Android pointer ordering.
     private val touchState = TouchFrameState()
     private var gestureDownTime = 0L
+    private val aimWarningShown = AtomicBoolean(false)
 
     override fun onCommand(command: InputEngine.TouchCommand) {
         if (closed.get()) return
@@ -50,7 +51,9 @@ class ShizukuInputBackend(
             is InputEngine.TouchCommand.Up ->
                 enqueueTouch { sendFrame(touchState.up(command.pointer)) }
             is InputEngine.TouchCommand.AimDelta ->
-                postStatus("AimDelta chưa có tọa độ vùng ngắm; chưa thể chuyển thành điểm chạm.")
+                if (aimWarningShown.compareAndSet(false, true)) {
+                    postStatus("Chưa có cấu hình vùng ngắm riêng; kéo chuột khi đang giữ nút đã được hỗ trợ.")
+                }
             is InputEngine.TouchCommand.Joystick ->
                 if (command.x != 0f || command.y != 0f) {
                     postStatus("Joystick cần cấu hình tâm và bán kính vùng chạm trước khi inject.")
