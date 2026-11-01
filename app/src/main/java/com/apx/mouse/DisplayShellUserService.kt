@@ -1,6 +1,10 @@
 package com.apx.mouse
 
 import android.os.Binder
+import android.os.Build
+import android.view.InputDevice
+import android.view.InputEvent
+import android.view.MotionEvent
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
@@ -65,6 +69,94 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
         } catch (e: Exception) {
             "ERROR: ${e.message ?: "Không chạy được chẩn đoán"}"
         }
+    }
+
+    /**
+     * Reports whether this shell process can resolve the platform injection API.
+     * This is an API-presence probe, not proof that the device accepts injected events.
+     */
+    override fun probeTouchInjection(): String {
+        return try {
+            val target = inputManagerTarget()
+            target.first.getDeclaredMethod("injectInputEvent", InputEvent::class.java, Int::class.javaPrimitiveType)
+            "OK: ${target.first.name}"
+        } catch (e: Exception) {
+            "ERROR: Touch injection API unavailable: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    /**
+     * Injects one complete touch frame. Arrays describe the full active pointer set,
+     * including the pointer being lifted for POINTER_UP/UP events.
+     */
+    override fun injectTouchFrame(
+        action: Int,
+        pointerIds: IntArray,
+        xs: FloatArray,
+        ys: FloatArray,
+        downTime: Long,
+        eventTime: Long
+    ): String {
+        if (pointerIds.isEmpty() || pointerIds.size > 10 ||
+            xs.size != pointerIds.size || ys.size != pointerIds.size ||
+            pointerIds.any { it !in 0..31 } ||
+            pointerIds.toSet().size != pointerIds.size ||
+            xs.any { !it.isFinite() || it < 0f } ||
+            ys.any { !it.isFinite() || it < 0f } ||
+            downTime <= 0L || eventTime < downTime
+        ) return "ERROR: Invalid touch frame"
+
+        val maskedAction = action and MotionEvent.ACTION_MASK
+        if (maskedAction !in setOf(
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP, MotionEvent.ACTION_MOVE,
+                MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN,
+                MotionEvent.ACTION_POINTER_UP
+            )
+        ) return "ERROR: Unsupported touch action"
+
+        return try {
+            val properties = Array(pointerIds.size) { index ->
+                MotionEvent.PointerProperties().apply {
+                    id = pointerIds[index]
+                    toolType = MotionEvent.TOOL_TYPE_FINGER
+                }
+            }
+            val coordinates = Array(pointerIds.size) { index ->
+                MotionEvent.PointerCoords().apply {
+                    x = xs[index]
+                    y = ys[index]
+                    pressure = 1f
+                    size = 1f
+                }
+            }
+            val event = MotionEvent.obtain(
+                downTime, eventTime, action, pointerIds.size, properties, coordinates,
+                0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0
+            )
+            try {
+                val (managerClass, manager) = inputManagerTarget()
+                val method = managerClass.getDeclaredMethod(
+                    "injectInputEvent", InputEvent::class.java, Int::class.javaPrimitiveType
+                ).apply { isAccessible = true }
+                val accepted = method.invoke(manager, event, 0) as? Boolean ?: false
+                if (accepted) "OK" else "ERROR: Android rejected the injected touch event"
+            } finally {
+                event.recycle()
+            }
+        } catch (e: Throwable) {
+            "ERROR: Touch injection failed: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    private fun inputManagerTarget(): Pair<Class<*>, Any> {
+        val className = if (Build.VERSION.SDK_INT >= 31)
+            "android.hardware.input.InputManagerGlobal"
+        else
+            "android.hardware.input.InputManager"
+        val clazz = Class.forName(className)
+        val instance = clazz.getDeclaredMethod("getInstance").apply { isAccessible = true }.invoke(null)
+            ?: throw IllegalStateException("Input manager instance unavailable")
+        return clazz to instance
     }
 
     override fun execute(command: String): String {
