@@ -284,7 +284,7 @@ class MainActivity : Activity() {
             addClick(card, action)
             addClick(value, action)
         }
-        pageButton("QUẢN LÝ SHIZUKU", 760f, 920f, 400f, 64f) { requestShizukuPermission() }
+        pageButton("CHẨN ĐOÁN CHUỘT / BÀN PHÍM", 710f, 920f, 500f, 64f) { startActivity(Intent(this, InputDiagnosticsActivity::class.java)) }
     }
 
     private fun buildAppDetailsPage() {
