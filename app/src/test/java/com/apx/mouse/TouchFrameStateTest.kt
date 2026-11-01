@@ -14,8 +14,6 @@ class TouchFrameStateTest {
 
         val up = state.up(1)!!
         assertEquals(TouchFrameState.ACTION_UP, up.action)
-        assertEquals(2, state.activeCount())
-        assertTrue(state.finishUp(7))
         assertEquals(1, state.activeCount())
         assertTrue(state.finishUp(1))
         assertEquals(0, state.activeCount())
@@ -31,6 +29,8 @@ class TouchFrameStateTest {
         val secondUp = state.up(7)!!
         assertEquals(TouchFrameState.ACTION_POINTER_UP or (1 shl 8), secondUp.action)
         assertEquals(listOf(2, 7), secondUp.pointers.map { it.id })
+        assertEquals(2, state.activeCount())
+        assertTrue(state.finishUp(7))
         assertEquals(1, state.activeCount())
     }
 
