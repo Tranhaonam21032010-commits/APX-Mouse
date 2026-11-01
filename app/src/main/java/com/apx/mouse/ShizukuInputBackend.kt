@@ -68,12 +68,8 @@ class ShizukuInputBackend(
             }.getOrDefault(false)
 
             val shellAvailable = if (granted) {
-                runCatching {
-                    val process = Shizuku.newProcess(arrayOf("sh", "-c", "command -v input"), null, null)
-                    val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
-                    val exit = process.waitFor()
-                    output.isNotEmpty() && exit == 0
-                }.getOrDefault(false)
+                val result = DisplayScaleController.execute("command -v input")
+                result.success && !result.output.contains("ERROR:")
             } else null
 
             val detail = when {
@@ -108,18 +104,11 @@ class ShizukuInputBackend(
 
                 val xi = x.toInt()
                 val yi = y.toInt()
-                val process = Shizuku.newProcess(
-                    arrayOf("input", "tap", xi.toString(), yi.toString()),
-                    null,
-                    null
-                )
-                val stdout = process.inputStream.bufferedReader().use { it.readText() }
-                val stderr = process.errorStream.bufferedReader().use { it.readText() }
-                val exitCode = process.waitFor()
-                if (exitCode == 0) {
+                val result = DisplayScaleController.execute("input tap $xi $yi")
+                if (result.success) {
                     postTapResult(true, "Đã gửi lệnh tap tại ($xi, $yi).")
                 } else {
-                    postTapResult(false, "Lệnh tap thất bại (exit=$exitCode): ${stderr.ifBlank { stdout }}")
+                    postTapResult(false, "Lệnh tap thất bại: ${result.output}")
                 }
             } catch (t: Throwable) {
                 postTapResult(false, "Không thể gửi tap: ${t.message ?: t.javaClass.simpleName}")
