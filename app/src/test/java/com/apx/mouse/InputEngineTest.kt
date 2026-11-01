@@ -92,6 +92,30 @@ class InputEngineTest {
         assertEquals(InputEngine.TouchCommand.Up(2), sink.commands[3])
     }
 
+
+    @Test fun leftMouseClickStaysAnchoredWhileMouseMoves() {
+        val sink = RecordingSink()
+        val engine = InputEngine(
+            sink,
+            InputEngine.Config(
+                screenWidth = 1000,
+                screenHeight = 500,
+                keyBindings = mapOf(
+                    KeyEvent.KEYCODE_BUTTON_1 to InputEngine.MouseButtonBinding(1, 0.2f, 0.8f)
+                )
+            )
+        )
+
+        assertTrue(engine.onRawMouseButton("BTN_LEFT", true))
+        engine.onRawMouseMotion(20, 12)
+        assertTrue(engine.onRawMouseButton("BTN_LEFT", false))
+
+        assertEquals(InputEngine.TouchCommand.Down(1, 199.8f, 399.2f), sink.commands[0])
+        assertEquals(InputEngine.TouchCommand.AimDelta(20f, 12f), sink.commands[1])
+        assertFalse(sink.commands.any { it is InputEngine.TouchCommand.Move })
+        assertEquals(InputEngine.TouchCommand.Up(1), sink.commands.last())
+    }
+
     @Test fun resetReleasesKeyboardAndJoystickPointers() {
         val sink = RecordingSink()
         val engine = InputEngine(
