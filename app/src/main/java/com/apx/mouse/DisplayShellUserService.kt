@@ -279,13 +279,33 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
         }
         return try {
             val process = ProcessBuilder("sh", "-c", normalized).redirectErrorStream(true).start()
-            val output = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
+            val output = StringBuilder()
+            val reader = Thread {
+                try {
+                    process.inputStream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            synchronized(output) {
+                                if (output.length < 16_000) output.append(line).append('\\n')
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // The process may be terminated after the timeout.
+                }
+            }.apply {
+                name = "APX-ShellCommand-Reader"
+                isDaemon = true
+                start()
+            }
+
             if (!waitForProcessExit(process, 4_000L)) {
                 process.destroy()
+                reader.join(500L)
                 "ERROR: Lệnh quá thời gian"
             } else {
-                val code = process.exitValue()
-                if (code == 0) output.ifBlank { "OK" } else "ERROR: $output"
+                reader.join(700L)
+                val text = synchronized(output) { output.toString().take(16_000) }
+                if (process.exitValue() == 0) text.ifBlank { "OK" } else "ERROR: $text"
             }
         } catch (e: Exception) {
             "ERROR: ${e.message ?: "Không chạy được lệnh"}"
