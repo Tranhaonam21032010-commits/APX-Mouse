@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+      - 'codex/**'
+  pull_request:
 
 jobs:
   test-and-build:

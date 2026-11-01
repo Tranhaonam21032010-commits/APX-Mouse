@@ -47,9 +47,10 @@ class GameOverlayService : Service() {
     private var manuallyHidden = false
     private var mappingRoot: FrameLayout? = null
     private var renderedMapping: String? = null
-    private var editorRoot: FrameLayout? = null
+    @Volatile private var editorRoot: FrameLayout? = null
+    private var editorCaptureArmed = false
     private val editorPoints = mutableListOf<EditorPoint>()
-    private var editorSelected = -1
+    @Volatile private var editorSelected = -1
     private var editorGamePackage = ""
     private var editorCanvas: View? = null
     @Volatile private var gamePackage: String = ""
@@ -70,6 +71,93 @@ class GameOverlayService : Service() {
     private val pingInProgress = AtomicBoolean(false)
     @Volatile private var networkPingText: String = "--"
     private var lastPingStartedAt = 0L
+
+    // Input capture is opt-in and is active only while the selected game is foreground.
+    private val inputControlExecutor = Executors.newSingleThreadExecutor()
+    private val inputDispatchExecutor = Executors.newSingleThreadExecutor()
+    private val inputCaptureStarting = AtomicBoolean(false)
+    @Volatile private var inputSessionAllowed = false
+    @Volatile private var inputSessionActive = false
+    @Volatile private var inputCaptureRunning = false
+    @Volatile private var lastInputStartAttemptAt = 0L
+    @Volatile private var inputEngine: InputEngine? = null
+    @Volatile private var inputBackend: ShizukuInputBackend? = null
+    private val evdevParser = EvdevInputEventParser()
+
+    private val inputEventListener = object : IInputEventListener.Stub() {
+        override fun onInputEventBatch(lines: Array<out String>) {
+            val safeLines = lines.map { it.take(512) }
+            runCatching {
+                inputDispatchExecutor.execute {
+                    if (!inputSessionActive) return@execute
+                    val engine = inputEngine ?: return@execute
+                    safeLines.forEach { line ->
+                        evdevParser.parseLine(line).forEach { event ->
+                            when (event) {
+                                is EvdevInputEventParser.Event.Key -> {
+                                    if (editorRoot != null) {
+                                        if (event.pressed && !event.repeat) {
+                                            evdevKeyCode(event.code)?.let(::assignEditorKey)
+                                        }
+                                    } else {
+                                        engine.onRawKey(event.code, event.pressed)
+                                    }
+                                }
+                                is EvdevInputEventParser.Event.MouseButton -> {
+                                    if (editorRoot != null) {
+                                        if (event.pressed) {
+                                            evdevMouseButtonKeyCode(event.code)?.let(::assignEditorKey)
+                                        }
+                                    } else {
+                                        engine.onRawMouseButton(event.code, event.pressed)
+                                    }
+                                }
+                                is EvdevInputEventParser.Event.Relative -> {
+                                    if (editorRoot == null) {
+                                        engine.onRawMouseMotion(event.dx, event.dy)
+                                        engine.onRawWheel(event.wheelX, event.wheelY)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        override fun onInputCaptureEnded(message: String) {
+            // A planned stop clears inputSessionActive before destroying getevent.
+            // An unexpected process exit must also release every held touch and worker.
+            val unexpected = inputSessionActive
+            inputSessionActive = false
+            handler.post {
+                inputCaptureRunning = false
+                if (unexpected && inputSessionAllowed && serviceActive.get()) {
+                    android.widget.Toast.makeText(
+                        this@GameOverlayService,
+                        "Input Engine đã dừng: ${message.take(120)}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            if (unexpected) {
+                runCatching {
+                    inputControlExecutor.execute {
+                        val engine = inputEngine
+                        inputEngine = null
+                        engine?.reset()
+                        val backend = inputBackend
+                        inputBackend = null
+                        backend?.close()
+                        inputCaptureRunning = false
+                        runCatching {
+                            inputDispatchExecutor.execute { evdevParser.reset() }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     private val monitor = object : Runnable {
         override fun run() {
@@ -93,7 +181,13 @@ class GameOverlayService : Service() {
 
                         // Keep the service alive while the player visits Home or another app.
                         val inGame = foreground == gamePackage
-                        if (inGame) outsideGameSince = null
+                        inputSessionAllowed = inGame
+                        if (inGame) {
+                            outsideGameSince = null
+                            startInputCaptureIfEnabled()
+                        } else {
+                            stopInputCapture()
+                        }
                         if (!inGame && scalePreviewPending) closeDisplayScalePanel(restore = true)
                         scaleRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
                         mouseTweakRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
@@ -144,7 +238,7 @@ class GameOverlayService : Service() {
 
         // Compact horizontal status bar: battery, network ping and FPS only.
         val bar = TextView(this).apply {
-            text = "PIN --%    PING --    FPS --"
+            text = "PIN --%    NET --"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -302,6 +396,162 @@ class GameOverlayService : Service() {
                 item.animate().alpha(0f).scaleX(0.25f).scaleY(0.25f)
                     .setStartDelay(0L).setDuration(50L)
                     .withEndAction { item.visibility = View.GONE }.start()
+            }
+        }
+    }
+
+    private fun startInputCaptureIfEnabled() {
+        if (!inputSessionAllowed || inputCaptureRunning || inputCaptureStarting.get()) return
+        val settings = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+        if (!settings.getBoolean(KEY_INPUT_ENABLED, false)) {
+            stopInputCapture()
+            return
+        }
+        val paths = settings.getStringSet(KEY_INPUT_PATHS, emptySet())?.toSet().orEmpty()
+            .filter { Regex("/dev/input/event[0-9]{1,3}").matches(it) }
+            .take(8)
+        if (paths.isEmpty()) return
+
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastInputStartAttemptAt < INPUT_RETRY_INTERVAL_MS) return
+        if (!inputCaptureStarting.compareAndSet(false, true)) return
+        lastInputStartAttemptAt = now
+
+        runCatching {
+            inputControlExecutor.execute {
+                var backend: ShizukuInputBackend? = null
+                try {
+                    if (!inputSessionAllowed || !serviceActive.get()) return@execute
+                    val connection = DisplayScaleController.connect(this@GameOverlayService)
+                    if (!connection.success) {
+                        postInputStatus(connection.output)
+                        return@execute
+                    }
+                    val ready = DisplayScaleController.awaitReady(4_000L)
+                    if (!ready.success) {
+                        postInputStatus(ready.output)
+                        return@execute
+                    }
+                    if (!inputSessionAllowed || !serviceActive.get()) return@execute
+
+                    val engineConfig = createGameInputConfig()
+                    val createdBackend = ShizukuInputBackend(object : ShizukuInputBackend.Listener {
+                        override fun onStatus(message: String) {
+                            android.util.Log.w("APX-MOUSE-INPUT", message)
+                        }
+                        override fun onTapResult(success: Boolean, message: String) {
+                            if (!success) android.util.Log.w("APX-MOUSE-INPUT", message)
+                        }
+                    })
+                    backend = createdBackend
+                    val engine = InputEngine(createdBackend, engineConfig)
+                    inputBackend = createdBackend
+                    inputEngine = engine
+                    evdevParser.reset()
+                    inputSessionActive = true
+
+                    // Set before the Binder call: getevent can exit and report its callback
+                    // before startInputCapture() returns to this worker.
+                    inputCaptureRunning = true
+                    val result = DisplayScaleController.startInputCapture(
+                        paths.toTypedArray(), inputEventListener
+                    )
+                    if (!result.success) {
+                        inputCaptureRunning = false
+                        inputSessionActive = false
+                        inputEngine = null
+                        inputBackend = null
+                        engine.reset()
+                        createdBackend.close()
+                        postInputStatus(result.output)
+                        return@execute
+                    }
+                    postInputStatus("Đã bật nhận chuột / bàn phím cho phiên game.")
+                } catch (e: Exception) {
+                    inputCaptureRunning = false
+                    inputSessionActive = false
+                    inputEngine = null
+                    inputBackend = null
+                    runCatching { backend?.close() }
+                    postInputStatus("Không thể khởi động Input Engine: ${e.message}")
+                } finally {
+                    inputCaptureStarting.set(false)
+                }
+            }
+        }.onFailure {
+            inputCaptureStarting.set(false)
+            postInputStatus("Không thể xếp lịch Input Engine: ${it.message}")
+        }
+    }
+
+    private fun createGameInputConfig(): InputEngine.Config {
+        val width = resources.displayMetrics.widthPixels.coerceAtLeast(1)
+        val height = resources.displayMetrics.heightPixels.coerceAtLeast(1)
+        val bindings = linkedMapOf<Int, InputEngine.MouseButtonBinding>()
+        val raw = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+            .getString(KEY_PREFIX + gamePackage, null)
+        if (!raw.isNullOrBlank()) {
+            runCatching {
+                val points = JSONArray(raw)
+                for (index in 0 until minOf(points.length(), MAX_MAPPED_POINTS)) {
+                    val item = points.getJSONObject(index)
+                    val keyCode = item.optInt("key", android.view.KeyEvent.KEYCODE_UNKNOWN)
+                    val x = item.optDouble("x", 0.5).toFloat()
+                    val y = item.optDouble("y", 0.5).toFloat()
+                    if (keyCode != android.view.KeyEvent.KEYCODE_UNKNOWN) {
+                        bindings.putIfAbsent(
+                            keyCode,
+                            InputEngine.MouseButtonBinding(
+                                pointerId = index + 1,
+                                x = x.coerceIn(0f, 1f),
+                                y = y.coerceIn(0f, 1f)
+                            )
+                        )
+                    }
+                }
+            }.onFailure {
+                android.util.Log.e("APX-MOUSE-INPUT", "Không đọc được keymap cho game", it)
+            }
+        }
+        val settings = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+        return InputEngine.Config(
+            screenWidth = width,
+            screenHeight = height,
+            aimSensitivityX = settings.getFloat("mouse_x_factor_$gamePackage", 1.0f).coerceIn(0.1f, 3.0f),
+            aimSensitivityY = settings.getFloat("mouse_y_factor_$gamePackage", 1.0f).coerceIn(0.1f, 3.0f),
+            joystickCenterX = settings.getFloat("joystick_center_x_$gamePackage", 0.18f),
+            joystickCenterY = settings.getFloat("joystick_center_y_$gamePackage", 0.78f),
+            joystickRadius = settings.getFloat("joystick_radius_$gamePackage", 0.12f),
+            keyBindings = bindings
+        )
+    }
+
+    private fun stopInputCapture() {
+        if (!inputCaptureRunning && !inputCaptureStarting.get() &&
+            inputEngine == null && inputBackend == null
+        ) return
+        inputSessionActive = false
+        runCatching {
+            inputControlExecutor.execute {
+                runCatching { DisplayScaleController.stopInputCapture() }
+                val engine = inputEngine
+                inputEngine = null
+                engine?.reset()
+                val backend = inputBackend
+                inputBackend = null
+                backend?.close()
+                inputCaptureRunning = false
+                runCatching { inputDispatchExecutor.execute { evdevParser.reset() } }
+            }
+        }
+    }
+
+    private fun postInputStatus(message: String) {
+        handler.post {
+            if (inputSessionAllowed && serviceActive.get()) {
+                android.widget.Toast.makeText(
+                    this@GameOverlayService, message, android.widget.Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
@@ -498,136 +748,181 @@ class GameOverlayService : Service() {
     private fun openMouseTweak() {
         setFanOpen(false)
         mouseTweakRoot?.let { closeMouseTweak(); return }
+
         val density = resources.displayMetrics.density
-        fun dp(v: Int) = (v * density).toInt()
+        fun dp(value: Int) = (value * density).toInt()
         val prefs = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
         val keyX = "mouse_x_factor_$gamePackage"
         val keyY = "mouse_y_factor_$gamePackage"
-        val keyMode = "mouse_lock_mode_$gamePackage"
-        val keyCursor = "mouse_cursor_visible_$gamePackage"
-        val keyToggle = "mouse_cursor_toggle_key_$gamePackage"
-        val valueX = prefs.getFloat(keyX, 1.0f)
-        val valueY = prefs.getFloat(keyY, 1.0f)
-        val cursorVisible = prefs.getBoolean(keyCursor, true)
-        val toggleCode = prefs.getInt(keyToggle, KeyEvent.KEYCODE_UNKNOWN)
-        var selectedMode = prefs.getString(keyMode, "fps") ?: "fps"
-        var bindingToggleKey = false
-        var keyLabelView: TextView? = null
 
         fun label(value: String, size: Float, color: Int = Color.WHITE, bold: Boolean = false) =
             TextView(this).apply {
-                text = value; textSize = size; setTextColor(color); gravity = Gravity.CENTER_VERTICAL
+                text = value
+                textSize = size
+                setTextColor(color)
+                gravity = Gravity.CENTER_VERTICAL
                 if (bold) typeface = android.graphics.Typeface.DEFAULT_BOLD
             }
-        fun field(value: Float, hint: String) = EditText(this).apply {
+
+        fun numberField(value: Float) = EditText(this).apply {
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setText(value.toString()); this.hint = hint; textSize = 16f
-            setTextColor(Color.WHITE); setHintTextColor(Color.GRAY)
+            setText(value.toString())
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
             setPadding(dp(10), dp(5), dp(10), dp(5))
             background = GradientDrawable().apply {
-                setColor(Color.rgb(18, 39, 66)); cornerRadius = dp(8).toFloat()
+                setColor(Color.rgb(18, 39, 66))
+                cornerRadius = dp(8).toFloat()
                 setStroke(dp(1), Color.rgb(64, 145, 255))
             }
-        }
-        fun actionButton(text: String, onClick: () -> Unit) = TextView(this).apply {
-            this.text = text; textSize = 12f; gravity = Gravity.CENTER
-            setTextColor(Color.WHITE); setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = GradientDrawable().apply { setColor(Color.rgb(25, 70, 116)); cornerRadius = dp(8).toFloat() }
-            isClickable = true; setOnClickListener { onClick() }
         }
 
-        val root = object : FrameLayout(this) {
-            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                if (bindingToggleKey && event.action == KeyEvent.ACTION_DOWN &&
-                    event.keyCode != KeyEvent.KEYCODE_BACK) {
-                    prefs.edit().putInt(keyToggle, event.keyCode).apply()
-                    keyLabelView?.text = "Phím đã chọn: " + KeyEvent.keyCodeToString(event.keyCode)
-                    bindingToggleKey = false
-                    return true
-                }
-                if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                    closeMouseTweak(); return true
-                }
-                return super.dispatchKeyEvent(event)
-            }
-        }.apply {
-            isFocusable = true; isFocusableInTouchMode = true
+        fun button(text: String, action: () -> Unit) = TextView(this).apply {
+            this.text = text
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
             background = GradientDrawable().apply {
-                setColor(Color.argb(248, 5, 15, 31)); cornerRadius = dp(16).toFloat()
+                setColor(Color.rgb(25, 70, 116))
+                cornerRadius = dp(8).toFloat()
+            }
+            isClickable = true
+            setOnClickListener { action() }
+        }
+
+        val root = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                setColor(Color.argb(248, 5, 15, 31))
+                cornerRadius = dp(16).toFloat()
                 setStroke(dp(1), Color.rgb(64, 145, 255))
             }
-            elevation = dp(14).toFloat(); setPadding(dp(14), dp(12), dp(14), dp(12))
+            elevation = dp(14).toFloat()
+            setPadding(dp(14), dp(12), dp(14), dp(12))
         }
         val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        panel.addView(label("APX MOUSE · MOUSE TWEAK", 17f, Color.WHITE, true), LinearLayout.LayoutParams(-1, dp(30)))
-        panel.addView(label("Game: $gamePackage", 10f, Color.LTGRAY), LinearLayout.LayoutParams(-1, dp(22)))
+        panel.addView(
+            label("APX MOUSE · MOUSE TWEAK", 17f, Color.WHITE, true),
+            LinearLayout.LayoutParams(-1, dp(30))
+        )
+        panel.addView(
+            label("Hồ sơ game: $gamePackage", 10f, Color.LTGRAY),
+            LinearLayout.LayoutParams(-1, dp(22))
+        )
 
-        val xRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        xRow.addView(label("Sensitivity X", 13f, Color.WHITE, true), LinearLayout.LayoutParams(0, dp(42), 1f))
-        val xInput = field(valueX, "1.0")
+        val xRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        xRow.addView(
+            label("Độ nhạy trục X", 13f, Color.WHITE, true),
+            LinearLayout.LayoutParams(0, dp(42), 1f)
+        )
+        val xInput = numberField(prefs.getFloat(keyX, 1.0f))
         xRow.addView(xInput, LinearLayout.LayoutParams(dp(112), dp(42)))
         panel.addView(xRow)
-        val yRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        yRow.addView(label("Sensitivity Y", 13f, Color.WHITE, true), LinearLayout.LayoutParams(0, dp(42), 1f))
-        val yInput = field(valueY, "1.0")
+
+        val yRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        yRow.addView(
+            label("Độ nhạy trục Y", 13f, Color.WHITE, true),
+            LinearLayout.LayoutParams(0, dp(42), 1f)
+        )
+        val yInput = numberField(prefs.getFloat(keyY, 1.0f))
         yRow.addView(yInput, LinearLayout.LayoutParams(dp(112), dp(42)))
         panel.addView(yRow)
 
-        panel.addView(label("Mouse Lock Mode", 13f, Color.rgb(100, 190, 255), true), LinearLayout.LayoutParams(-1, dp(30)))
-        val modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        modeRow.addView(actionButton("FPS · ẨN CON TRỎ") {
-            selectedMode = "fps"; prefs.edit().putString(keyMode, selectedMode).apply()
-        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(0, 0, dp(4), 0) })
-        modeRow.addView(actionButton("GIỚI HẠN CON TRỎ") {
-            selectedMode = "boundary"; prefs.edit().putString(keyMode, selectedMode).apply()
-        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(dp(4), 0, 0, 0) })
-        panel.addView(modeRow)
+        panel.addView(
+            label("Nhập giá trị từ 0.1 đến 3.0. Thay đổi được áp dụng ngay trong phiên game hiện tại.", 10f, Color.LTGRAY),
+            LinearLayout.LayoutParams(-1, dp(38))
+        )
+        panel.addView(
+            label("Chuột phải kéo điểm ngắm đã gán. Chuột trái giữ vị trí bấm. Khóa con trỏ toàn hệ thống chưa được hỗ trợ trên bản này.", 10f, Color.rgb(255, 205, 130)),
+            LinearLayout.LayoutParams(-1, dp(50))
+        )
 
-        val cursorStatus = label("Con trỏ: " + if (cursorVisible) "ĐANG HIỆN" else "ĐANG ẨN", 12f, Color.WHITE)
-        panel.addView(cursorStatus, LinearLayout.LayoutParams(-1, dp(30)))
-        panel.addView(actionButton("GÁN PHÍM BẬT / TẮT CON TRỎ") {
-            bindingToggleKey = true; cursorStatus.text = "Nhấn phím muốn gán…"; root.requestFocus()
-        }, LinearLayout.LayoutParams(-1, dp(40)))
-        val savedKey = if (toggleCode == KeyEvent.KEYCODE_UNKNOWN) "Chưa gán" else KeyEvent.keyCodeToString(toggleCode)
-        keyLabelView = label("Phím đã chọn: $savedKey", 10f, Color.LTGRAY)
-        panel.addView(keyLabelView, LinearLayout.LayoutParams(-1, dp(24)))
-        panel.addView(label("Cấu hình được lưu theo game. Khóa chuột và phím tắt toàn hệ thống chưa hoạt động cho đến khi có Input Engine tương thích.", 10f, Color.rgb(255, 205, 130)),
-            LinearLayout.LayoutParams(-1, dp(48)))
-
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
-        buttons.addView(actionButton("ĐÓNG") { closeMouseTweak() }, LinearLayout.LayoutParams(-2, dp(40)).apply { setMargins(dp(4), 0, dp(4), 0) })
-        buttons.addView(actionButton("RESET X/Y") { xInput.setText("1.0"); yInput.setText("1.0") },
-            LinearLayout.LayoutParams(-2, dp(40)).apply { setMargins(dp(4), 0, dp(4), 0) })
-        buttons.addView(actionButton("LƯU") {
-            val xValue = xInput.text.toString().toFloatOrNull()
-            val yValue = yInput.text.toString().toFloatOrNull()
-            if (xValue == null || yValue == null || !xValue.isFinite() || !yValue.isFinite() || xValue <= 0f || yValue <= 0f) {
-                android.widget.Toast.makeText(this@GameOverlayService, "X/Y phải là số lớn hơn 0", android.widget.Toast.LENGTH_SHORT).show()
-                return@actionButton
+        val buttons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+        }
+        buttons.addView(
+            button("ĐÓNG") { closeMouseTweak() },
+            LinearLayout.LayoutParams(-2, dp(40)).apply {
+                setMargins(dp(4), 0, dp(4), 0)
             }
-            prefs.edit().putFloat(keyX, xValue).putFloat(keyY, yValue).putString(keyMode, selectedMode).apply()
-            android.widget.Toast.makeText(this@GameOverlayService, "Đã lưu X=$xValue · Y=$yValue", android.widget.Toast.LENGTH_SHORT).show()
-            closeMouseTweak()
-        }, LinearLayout.LayoutParams(-2, dp(40)).apply { setMargins(dp(4), 0, 0, 0) })
+        )
+        buttons.addView(
+            button("ĐẶT LẠI") {
+                xInput.setText("1.0")
+                yInput.setText("1.0")
+            },
+            LinearLayout.LayoutParams(-2, dp(40)).apply {
+                setMargins(dp(4), 0, dp(4), 0)
+            }
+        )
+        buttons.addView(
+            button("LƯU") {
+                val xValue = xInput.text.toString().toFloatOrNull()
+                val yValue = yInput.text.toString().toFloatOrNull()
+                if (xValue == null || yValue == null ||
+                    !xValue.isFinite() || !yValue.isFinite() ||
+                    xValue !in 0.1f..3.0f || yValue !in 0.1f..3.0f
+                ) {
+                    android.widget.Toast.makeText(
+                        this@GameOverlayService,
+                        "Độ nhạy X/Y phải nằm trong khoảng 0.1–3.0",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    return@button
+                }
+
+                prefs.edit().putFloat(keyX, xValue).putFloat(keyY, yValue).apply()
+                runCatching {
+                    inputDispatchExecutor.execute {
+                        inputEngine?.updateConfig(createGameInputConfig())
+                    }
+                }
+                android.widget.Toast.makeText(
+                    this@GameOverlayService,
+                    "Đã lưu và áp dụng X=$xValue · Y=$yValue",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                closeMouseTweak()
+            },
+            LinearLayout.LayoutParams(-2, dp(40)).apply {
+                setMargins(dp(4), 0, 0, 0)
+            }
+        )
         panel.addView(buttons)
         root.addView(panel, FrameLayout.LayoutParams(-1, -2))
 
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
-        val params = WindowManager.LayoutParams(dp(360), -2, type,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(82)
+        val params = WindowManager.LayoutParams(
+            dp(360), -2, type,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = dp(82)
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
         mouseTweakRoot = root
         try {
-            windowManager.addView(root, params); root.requestFocus()
-        } catch (e: Exception) {
+            windowManager.addView(root, params)
+        } catch (error: Exception) {
             mouseTweakRoot = null
-            android.widget.Toast.makeText(this@GameOverlayService, "Không thể mở Mouse Tweak: " + e.message, android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(
+                this@GameOverlayService,
+                "Không thể mở Mouse Tweak: ${error.message}",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -639,12 +934,63 @@ class GameOverlayService : Service() {
 
     private data class EditorPoint(var x: Float, var y: Float, var keyCode: Int = KeyEvent.KEYCODE_UNKNOWN)
 
+    /** Map Linux evdev key names to Android key codes while the in-game editor is armed. */
+    private fun evdevKeyCode(evdevName: String): Int? {
+        if (!evdevName.startsWith("KEY_")) return null
+        val suffix = evdevName.removePrefix("KEY_")
+        val androidName = when (suffix) {
+            "ESC" -> "ESCAPE"
+            "BACKSPACE" -> "DEL"
+            "DELETE" -> "FORWARD_DEL"
+            "LEFTSHIFT" -> "SHIFT_LEFT"
+            "RIGHTSHIFT" -> "SHIFT_RIGHT"
+            "LEFTCTRL" -> "CTRL_LEFT"
+            "RIGHTCTRL" -> "CTRL_RIGHT"
+            "LEFTALT" -> "ALT_LEFT"
+            "RIGHTALT" -> "ALT_RIGHT"
+            "LEFTMETA" -> "META_LEFT"
+            "RIGHTMETA" -> "META_RIGHT"
+            "CAPSLOCK" -> "CAPS_LOCK"
+            "PAGEUP" -> "PAGE_UP"
+            "PAGEDOWN" -> "PAGE_DOWN"
+            "UP" -> "DPAD_UP"
+            "DOWN" -> "DPAD_DOWN"
+            "LEFT" -> "DPAD_LEFT"
+            "RIGHT" -> "DPAD_RIGHT"
+            "KPENTER" -> "NUMPAD_ENTER"
+            else -> suffix
+        }
+        return KeyEvent.keyCodeFromString("KEYCODE_$androidName")
+            .takeIf { it != KeyEvent.KEYCODE_UNKNOWN }
+    }
+
+    private fun evdevMouseButtonKeyCode(evdevName: String): Int? = when (evdevName) {
+        "BTN_LEFT" -> KeyEvent.KEYCODE_BUTTON_1
+        "BTN_RIGHT" -> KeyEvent.KEYCODE_BUTTON_2
+        "BTN_MIDDLE" -> KeyEvent.KEYCODE_BUTTON_3
+        "BTN_SIDE" -> KeyEvent.KEYCODE_BUTTON_4
+        "BTN_EXTRA" -> KeyEvent.KEYCODE_BUTTON_5
+        else -> null
+    }
+
+    private fun assignEditorKey(keyCode: Int) {
+        handler.post {
+            if (editorRoot == null || !editorCaptureArmed ||
+                editorSelected !in editorPoints.indices
+            ) return@post
+            editorPoints[editorSelected].keyCode = keyCode
+            editorCaptureArmed = false
+            editorCanvas?.invalidate()
+        }
+    }
+
     private fun openMappingEditor() {
         setFanOpen(false)
         if (editorRoot != null) { closeMappingEditor(); return }
         editorGamePackage = gamePackage
         editorPoints.clear()
         editorSelected = -1
+        editorCaptureArmed = false
         val raw = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE).getString(KEY_PREFIX + editorGamePackage, null)
         try {
             if (!raw.isNullOrBlank()) {
@@ -664,8 +1010,7 @@ class GameOverlayService : Service() {
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                 if (event.action == KeyEvent.ACTION_DOWN && editorSelected in editorPoints.indices &&
                     event.keyCode != KeyEvent.KEYCODE_BACK) {
-                    editorPoints[editorSelected].keyCode = event.keyCode
-                    editorCanvas?.invalidate()
+                    assignEditorKey(event.keyCode)
                     return true
                 }
                 if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
@@ -712,11 +1057,24 @@ class GameOverlayService : Service() {
                             dx * dx + dy * dy < dp(34) * dp(34).toFloat()
                         }
                         if (hit == null) {
-                            editorPoints.add(EditorPoint((e.x / width.coerceAtLeast(1)).coerceIn(0f, 1f),
-                                (e.y / height.coerceAtLeast(1)).coerceIn(0f, 1f)))
-                            editorSelected = editorPoints.lastIndex
+                            if (editorPoints.size < MAX_MAPPED_POINTS) {
+                                editorPoints.add(EditorPoint((e.x / width.coerceAtLeast(1)).coerceIn(0f, 1f),
+                                    (e.y / height.coerceAtLeast(1)).coerceIn(0f, 1f)))
+                                editorSelected = editorPoints.lastIndex
+                                editorCaptureArmed = true
+                            } else {
+                                android.widget.Toast.makeText(
+                                    this@GameOverlayService,
+                                    "Tối đa $MAX_MAPPED_POINTS điểm; một điểm được dành cho joystick",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
                             dragging = false
-                        } else { editorSelected = hit; dragging = true }
+                        } else {
+                            editorSelected = hit
+                            editorCaptureArmed = hit != null
+                            dragging = true
+                        }
                         invalidate()
                         root.requestFocus()
                         return true
@@ -753,16 +1111,32 @@ class GameOverlayService : Service() {
             }, LinearLayout.LayoutParams(-2, dp(42)))
         }
         tool("＋ Thêm") {
-            editorPoints.add(EditorPoint(0.5f, 0.5f)); editorSelected = editorPoints.lastIndex; canvas.invalidate()
+            if (editorPoints.size >= MAX_MAPPED_POINTS) {
+                android.widget.Toast.makeText(
+                    this@GameOverlayService,
+                    "Tối đa $MAX_MAPPED_POINTS điểm; một điểm được dành cho joystick",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                editorPoints.add(EditorPoint(0.5f, 0.5f))
+                editorSelected = editorPoints.lastIndex
+                editorCaptureArmed = true
+                canvas.invalidate()
+            }
         }
         tool("Xóa") {
             if (editorSelected in editorPoints.indices) {
-                editorPoints.removeAt(editorSelected); editorSelected = -1; canvas.invalidate()
+                editorPoints.removeAt(editorSelected)
+                editorSelected = -1
+                editorCaptureArmed = false
+                canvas.invalidate()
             }
         }
         tool("Bỏ gán") {
             if (editorSelected in editorPoints.indices) {
-                editorPoints[editorSelected].keyCode = KeyEvent.KEYCODE_UNKNOWN; canvas.invalidate()
+                editorPoints[editorSelected].keyCode = KeyEvent.KEYCODE_UNKNOWN
+                editorCaptureArmed = true
+                canvas.invalidate()
             }
         }
         tool("Lưu") { saveEditorMappings() }
@@ -771,7 +1145,7 @@ class GameOverlayService : Service() {
             topMargin = dp(8)
         })
         val hint = TextView(this).apply {
-            text = "Chạm vị trí trong game để thêm nút · Kéo để di chuyển · Chọn nút rồi nhấn phím"
+            text = "Chạm vị trí để thêm · Kéo để di chuyển · Chọn điểm rồi bấm phím hoặc nút chuột để gán (tối đa 9 điểm)"
             textSize = 11f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             setPadding(dp(8), dp(5), dp(8), dp(5))
             background = GradientDrawable().apply {
@@ -790,6 +1164,7 @@ class GameOverlayService : Service() {
         try {
             windowManager.addView(root, params)
             editorRoot = root
+            inputDispatchExecutor.execute { inputEngine?.reset() }
             bubbleRoot?.visibility = View.GONE
             root.requestFocus()
         } catch (_: Exception) { editorRoot = null; editorCanvas = null }
@@ -812,12 +1187,13 @@ class GameOverlayService : Service() {
             .putBoolean(VISIBLE_PREFIX + editorGamePackage, true).apply()
         renderedMapping = null
         editorCanvas?.invalidate()
-        android.widget.Toast.makeText(this, "Đã lưu \${editorPoints.size} nút", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(this, "Đã lưu ${editorPoints.size} nút", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun closeMappingEditor(refreshOverlay: Boolean = true) {
         editorRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         editorRoot = null
+        editorCaptureArmed = false
         editorCanvas = null
         renderedMapping = null
         if (serviceActive.get()) bubbleRoot?.visibility = View.VISIBLE
@@ -839,12 +1215,12 @@ class GameOverlayService : Service() {
             lastBatteryReadAt = now
         }
         startNetworkPingIfDue()
-        statsView?.text = "PIN $cachedBatteryText    PING $networkPingText    FPS --"
+        statsView?.text = "PIN $cachedBatteryText    PING 1.1.1.1 $networkPingText"
     }
 
     private fun startNetworkPingIfDue() {
         val now = System.currentTimeMillis()
-        if (now - lastPingStartedAt < 5000L || !pingInProgress.compareAndSet(false, true)) return
+        if (now - lastPingStartedAt < NETWORK_PING_INTERVAL_MS || !pingInProgress.compareAndSet(false, true)) return
         lastPingStartedAt = now
         try {
             pingExecutor.execute {
@@ -1032,6 +1408,15 @@ class GameOverlayService : Service() {
         handler.removeCallbacksAndMessages(null)
         monitorExecutor.shutdownNow()
         pingExecutor.shutdownNow()
+        inputSessionAllowed = false
+        inputSessionActive = false
+        runCatching { DisplayScaleController.stopInputCapture() }
+        inputEngine?.reset()
+        inputEngine = null
+        inputBackend?.close()
+        inputBackend = null
+        inputControlExecutor.shutdownNow()
+        inputDispatchExecutor.shutdownNow()
         closeDisplayScalePanel(restore = true)
         closeMouseTweak()
         overlayRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
@@ -1053,7 +1438,12 @@ class GameOverlayService : Service() {
     companion object {
         private const val GAME_POLL_INTERVAL_MS = 1_000L
         private const val BACKGROUND_POLL_INTERVAL_MS = 4_000L
-        private const val BATTERY_REFRESH_INTERVAL_MS = 10_000L
+        private const val BATTERY_REFRESH_INTERVAL_MS = 15_000L
+        private const val NETWORK_PING_INTERVAL_MS = 15_000L
+        private const val INPUT_RETRY_INTERVAL_MS = 10_000L
+        private const val KEY_INPUT_ENABLED = "input_capture_enabled"
+        private const val KEY_INPUT_PATHS = "input_event_paths"
+        private const val MAX_MAPPED_POINTS = 9
 
         const val EXTRA_GAME_PACKAGE = "extra_game_package"
         private const val CHANNEL_ID = "apx_game_overlay"

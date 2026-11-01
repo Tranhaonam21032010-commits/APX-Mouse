@@ -1,5 +1,6 @@
 package com.apx.mouse
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
@@ -17,6 +18,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -26,13 +28,19 @@ import kotlin.math.min
 
 class MainActivity : Activity() {
     private data class Placement(val view: View, val x: Float, val y: Float, val width: Float, val height: Float)
+    private data class PanelStyle(
+        val colors: IntArray,
+        val radius: Float,
+        val neonBorder: Boolean = false
+    )
 
     private val placements = mutableListOf<Placement>()
     private val textSizes = mutableMapOf<TextView, Float>()
-    private val backgroundViews = mutableMapOf<View, Pair<IntArray, Float>>()
+    private val backgroundViews = mutableMapOf<View, PanelStyle>()
     private val dynamicViews = mutableListOf<View>()
     private val emptyStateViews = mutableListOf<View>()
     private var appPage = 0
+    private var addAppsPage = 0
     private var swipeStartX = 0f
     private var swipeStartY = 0f
     private var pagingGesture = false
@@ -47,6 +55,7 @@ class MainActivity : Activity() {
     private lateinit var shizukuStatus: TextView
     private lateinit var shizukuDot: View
     private lateinit var shizukuButton: TextView
+    private lateinit var rootAccessStatus: TextView
 
     private val prefs by lazy { getSharedPreferences("apx_mouse", MODE_PRIVATE) }
     private val selectedPackages by lazy {
@@ -67,10 +76,11 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        selectedGame = prefs.getString(KEY_SELECTED_GAME, "") ?: ""
         window.statusBarColor = canvasBackground
         window.navigationBarColor = canvasBackground
         canvas = FrameLayout(this).apply { setBackgroundColor(canvasBackground) }
-        buildHub()
+        renderCurrentPage()
         setContentView(canvas)
         canvas.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutCanvas() }
         canvas.post { layoutCanvas() }
@@ -84,12 +94,19 @@ class MainActivity : Activity() {
         addPanel(0f, 0f, 1920f, 1080f, intArrayOf(Color.rgb(4, 8, 19), Color.rgb(8, 18, 38), Color.rgb(4, 9, 20)), 0f)
         addText("APX MOUSE", 54f, 42f, 420f, 66f, 40f, white, true)
         addText("GAMING CONTROL CENTER", 58f, 108f, 420f, 28f, 15f, muted, true)
+        pageButton("CHỌN GAME", 1280f, 48f, 220f, 82f) { navigateTo(UiPage.GAME_SELECTION) }
         val addAppButton = addPanel(1650f, 48f, 82f, 82f, intArrayOf(Color.rgb(20, 55, 96), Color.rgb(10, 28, 52)), 18f)
-        addClick(addAppButton) { showAppPicker() }
-        addClick(addText("+", 1650f, 48f, 82f, 82f, 42f, blue, true, Gravity.CENTER)) { showAppPicker() }
+        addAppButton.contentDescription = "Thêm ứng dụng vào Game Space"
+        addClick(addAppButton) { navigateTo(UiPage.ADD_APPS) }
+        val addAppIcon = addText("+", 1650f, 48f, 82f, 82f, 42f, blue, true, Gravity.CENTER)
+        addAppIcon.contentDescription = "Thêm ứng dụng vào Game Space"
+        addClick(addAppIcon) { navigateTo(UiPage.ADD_APPS) }
         val settingsButton = addPanel(1760f, 48f, 82f, 82f, intArrayOf(Color.rgb(20, 48, 86), Color.rgb(12, 27, 53)), 18f)
-        addClick(settingsButton) { showSettings() }
-        addClick(addText("⚙", 1760f, 48f, 82f, 82f, 34f, blue, true, Gravity.CENTER)) { showSettings() }
+        settingsButton.contentDescription = "Mở cài đặt"
+        addClick(settingsButton) { navigateTo(UiPage.SETTINGS) }
+        val settingsIcon = addText("⚙", 1760f, 48f, 82f, 82f, 34f, blue, true, Gravity.CENTER)
+        settingsIcon.contentDescription = "Mở cài đặt"
+        addClick(settingsIcon) { navigateTo(UiPage.SETTINGS) }
         addPanel(60f, 164f, 1380f, 850f, intArrayOf(Color.rgb(18, 39, 72), Color.rgb(7, 15, 32), Color.rgb(12, 27, 52)), 30f)
         addText("TRÒ CHƠI CỦA BẠN", 112f, 202f, 650f, 48f, 27f, white, true)
         addText("Chọn ứng dụng để mở nhanh · Vuốt ngang để chuyển trang", 114f, 253f, 900f, 34f, 18f, muted, false)
@@ -104,11 +121,358 @@ class MainActivity : Activity() {
         addPanel(1515f, 365f, 310f, 86f, intArrayOf(Color.rgb(24, 105, 133), Color.rgb(12, 54, 83)), 18f)
         shizukuButton = addText("Kết nối Shizuku", 1530f, 388f, 280f, 40f, 19f, white, true, Gravity.CENTER)
         addClick(shizukuButton) { requestShizukuPermission() }
-        addText("ROOT ACCESS", 1518f, 540f, 300f, 32f, 15f, muted, true)
+        addText("KIỂU QUYỀN SHIZUKU", 1518f, 540f, 300f, 32f, 15f, muted, true)
         addPanel(1515f, 585f, 310f, 86f, intArrayOf(Color.rgb(37, 53, 82), Color.rgb(17, 28, 50)), 18f)
-        addClick(addText("DÙNG ROOT", 1530f, 608f, 280f, 40f, 19f, muted, true, Gravity.CENTER)) { toast("Chế độ Root chưa được tích hợp") }
-        addText("Shizuku và Root là hai phương thức cấp quyền riêng biệt.", 1518f, 710f, 300f, 72f, 14f, muted, false)
+        rootAccessStatus = addText(shizukuIdentityLabel(), 1530f, 608f, 280f, 40f, 15f, muted, true, Gravity.CENTER)
+        addClick(rootAccessStatus) { showShizukuIdentityInfo() }
+        addText("UID 0 = Root · UID 2000 = ADB shell. APX chỉ hiển thị phiên hiện tại, không tự cấp quyền Root.", 1518f, 710f, 300f, 72f, 13f, muted, false)
         renderGameSpace()
+    }
+
+
+    private enum class UiPage { HUB, GAME_SELECTION, ADD_APPS, SETTINGS, APP_DETAILS }
+    private var currentPage = UiPage.HUB
+    private var selectedPackage: String? = null
+    private var selectedGame = ""
+    private var gameSelectionPage = 0
+
+    private fun navigateTo(page: UiPage) {
+        currentPage = page
+        renderCurrentPage()
+        val fade = prefs.getString("app_transition", "Trượt") == "Mờ dần"
+        canvas.animate().cancel()
+        canvas.alpha = if (fade) 0f else 0.92f
+        canvas.translationX = if (fade) 0f else 22f
+        canvas.animate()
+            .alpha(1f)
+            .translationX(0f)
+            .setDuration(PAGE_TRANSITION_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun renderCurrentPage() {
+        clearScreen()
+        when (currentPage) {
+            UiPage.HUB -> buildHub()
+            UiPage.GAME_SELECTION -> buildGameSelectionPage()
+            UiPage.ADD_APPS -> buildAddAppsPage()
+            UiPage.SETTINGS -> buildSettingsPage()
+            UiPage.APP_DETAILS -> buildAppDetailsPage()
+        }
+        layoutCanvas()
+        if (currentPage == UiPage.HUB) updateShizukuStatus()
+    }
+
+    private fun clearScreen() {
+        placements.forEach { it.view.animate().cancel() }
+        canvas.removeAllViews()
+        placements.clear()
+        textSizes.clear()
+        backgroundViews.clear()
+        dynamicViews.clear()
+        emptyStateViews.clear()
+    }
+
+    private fun buildPageHeader(title: String, subtitle: String) {
+        addPanel(0f, 0f, 1920f, 1080f,
+            intArrayOf(Color.rgb(4, 8, 19), Color.rgb(8, 18, 38), Color.rgb(4, 9, 20)), 0f)
+        addText("APX MOUSE", 54f, 35f, 350f, 55f, 34f, white, true)
+        addText(title, 420f, 40f, 1000f, 52f, 31f, white, true)
+        addText(subtitle, 424f, 94f, 1050f, 30f, 16f, muted, false)
+        pageButton("← GAME SPACE", 54f, 132f, 220f, 64f) { navigateTo(UiPage.HUB) }
+        pageButton("CÀI ĐẶT", 1640f, 42f, 220f, 64f) { navigateTo(UiPage.SETTINGS) }
+    }
+
+    private fun pageButton(
+        label: String, x: Float, y: Float, width: Float, height: Float,
+        action: () -> Unit
+    ) {
+        val panel = addPanel(
+            x, y, width, height,
+            intArrayOf(Color.rgb(24, 72, 118), Color.rgb(10, 31, 58)), 16f,
+            neonBorder = prefs.getBoolean("neon_enabled", true)
+        )
+        addClick(panel, action)
+        val text = addText(label, x + 12f, y + 4f, width - 24f, height - 8f,
+            18f, white, true, Gravity.CENTER)
+        addClick(text, action)
+        text.contentDescription = label
+    }
+
+    private fun buildGameSelectionPage() {
+        buildPageHeader("CHỌN GAME TRÊN ĐIỆN THOẠI",
+            "Danh sách lấy trực tiếp từ ứng dụng đã cài đặt · Chạm để chọn game")
+        val apps = getLaunchableApps(includeSystemApps = true)
+        if (apps.isEmpty()) {
+            addText("KHÔNG TÌM THẤY ỨNG DỤNG CÓ THỂ MỞ",
+                300f, 390f, 1320f, 60f, 25f, muted, true, Gravity.CENTER)
+            addText("Cài game có biểu tượng mở ứng dụng, sau đó quay lại đây.",
+                300f, 455f, 1320f, 40f, 17f, muted, false, Gravity.CENTER)
+            pageButton("QUAY LẠI GAME SPACE", 710f, 820f, 500f, 72f) {
+                navigateTo(UiPage.HUB)
+            }
+            return
+        }
+
+        if (selectedGame.isNotBlank() && apps.none { it.activityInfo.packageName == selectedGame }) {
+            selectedGame = ""
+            prefs.edit().remove(KEY_SELECTED_GAME).apply()
+        }
+
+        val pageSize = 12
+        val pageCount = ((apps.size + pageSize - 1) / pageSize).coerceAtLeast(1)
+        gameSelectionPage = gameSelectionPage.coerceIn(0, pageCount - 1)
+        apps.drop(gameSelectionPage * pageSize).take(pageSize).forEachIndexed { index, app ->
+            val packageName = app.activityInfo.packageName
+            val label = app.loadLabel(packageManager).toString()
+            val active = selectedGame == packageName
+            val col = index % 4
+            val row = index / 4
+            val x = 70f + col * 455f
+            val y = 220f + row * 205f
+            val colors = if (active) intArrayOf(Color.rgb(23, 105, 155), Color.rgb(10, 43, 75))
+                else intArrayOf(Color.rgb(22, 48, 82), Color.rgb(8, 21, 42))
+            val card = addPanel(x, y, 420f, 175f, colors, 20f,
+                neonBorder = active || prefs.getBoolean("neon_enabled", true))
+            card.contentDescription = "$label, ${if (active) "đang được chọn" else "chạm để chọn"}"
+            addClick(card) {
+                selectedGame = packageName
+                selectedPackages.add(packageName)
+                prefs.edit()
+                    .putString(KEY_SELECTED_GAME, packageName)
+                    .putStringSet(KEY_SELECTED_APPS, selectedPackages.toSet())
+                    .apply()
+                navigateTo(UiPage.GAME_SELECTION)
+            }
+            val icon = ImageView(this).apply {
+                setImageDrawable(app.loadIcon(packageManager))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = label
+            }
+            addAt(icon, x + 22f, y + 38f, 92f, 92f)
+            val title = addText(label, x + 132f, y + 30f, 270f, 52f,
+                21f, white, true)
+            val packageLabel = addText(packageName, x + 132f, y + 83f, 270f, 32f,
+                12f, muted, false)
+            val state = addText(
+                if (active) "✓ GAME ĐANG CHỌN" else "CHỌN GAME NÀY",
+                x + 132f, y + 125f, 270f, 32f, 14f,
+                if (active) green else blue, true
+            )
+            listOf(title, packageLabel, state, icon).forEach { view ->
+                view.isClickable = true
+                view.setOnClickListener { card.performClick() }
+                view.contentDescription = label
+            }
+        }
+
+        addText(
+            "ĐÃ TÌM THẤY ${apps.size} ỨNG DỤNG · ${if (selectedGame.isBlank()) "CHƯA CHỌN GAME" else "ĐÃ CHỌN: ${selectedGameLabel()}"}",
+            360f, 855f, 1200f, 38f, 16f, muted, true, Gravity.CENTER
+        )
+        if (pageCount > 1) {
+            if (gameSelectionPage > 0) pageButton("‹ TRƯỚC", 330f, 910f, 210f, 54f) {
+                gameSelectionPage--
+                navigateTo(UiPage.GAME_SELECTION)
+            }
+            addText("TRANG ${gameSelectionPage + 1} / $pageCount",
+                760f, 915f, 400f, 42f, 16f, muted, true, Gravity.CENTER)
+            if (gameSelectionPage < pageCount - 1) pageButton("SAU ›", 1380f, 910f, 210f, 54f) {
+                gameSelectionPage++
+                navigateTo(UiPage.GAME_SELECTION)
+            }
+        }
+        pageButton("MỞ GAME SPACE", 760f, 985f, 400f, 64f) {
+            if (selectedGame.isBlank()) {
+                toast("Hãy chọn một game trong danh sách trước")
+            } else {
+                navigateTo(UiPage.HUB)
+            }
+        }
+    }
+
+    private fun selectedGameLabel(): String {
+        if (selectedGame.isBlank()) return "Chưa chọn game"
+        return runCatching {
+            val info = packageManager.getApplicationInfo(selectedGame, 0)
+            packageManager.getApplicationLabel(info).toString()
+        }.getOrDefault("Game không còn cài đặt")
+    }
+
+    private fun buildAddAppsPage() {
+        buildPageHeader("THÊM ỨNG DỤNG", "Chọn ứng dụng muốn xuất hiện trong Game Space · Duyệt toàn bộ ứng dụng theo trang")
+        val apps = getLaunchableApps()
+        if (apps.isEmpty()) {
+            addText("Không tìm thấy ứng dụng có thể mở", 400f, 430f, 1120f, 70f,
+                26f, muted, false, Gravity.CENTER)
+            return
+        }
+        val pageCount = ((apps.size + 11) / 12).coerceAtLeast(1)
+        addAppsPage = addAppsPage.coerceIn(0, pageCount - 1)
+        apps.drop(addAppsPage * 12).take(12).forEachIndexed { index, app ->
+            val packageName = app.activityInfo.packageName
+            val label = app.loadLabel(packageManager).toString()
+            val selected = selectedPackages.contains(packageName)
+            val col = index % 4
+            val row = index / 4
+            val x = 70f + col * 455f
+            val y = 245f + row * 205f
+            val colors = if (selected) intArrayOf(Color.rgb(20, 91, 130), Color.rgb(9, 40, 68))
+                else intArrayOf(Color.rgb(22, 43, 73), Color.rgb(8, 19, 39))
+            val card = addPanel(x, y, 420f, 170f, colors, 20f)
+            val toggle = {
+                if (selectedPackages.contains(packageName)) selectedPackages.remove(packageName)
+                else selectedPackages.add(packageName)
+                prefs.edit().putStringSet(KEY_SELECTED_APPS, selectedPackages.toSet()).apply()
+                navigateTo(UiPage.ADD_APPS)
+            }
+            addClick(card, toggle)
+            val icon = ImageView(this).apply {
+                setImageDrawable(app.loadIcon(packageManager))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = label
+            }
+            addAt(icon, x + 22f, y + 32f, 86f, 86f)
+            val name = addText(label, x + 125f, y + 26f, 270f, 60f, 20f, white, true)
+            addClick(name, toggle)
+            addText(if (selected) "✓ ĐÃ THÊM" else "+ THÊM VÀO GAME SPACE",
+                x + 125f, y + 92f, 270f, 40f, 15f,
+                if (selected) green else blue, true)
+        }
+
+        if (pageCount > 1) {
+            if (addAppsPage > 0) pageButton("‹ TRƯỚC", 340f, 870f, 220f, 54f) {
+                addAppsPage--
+                navigateTo(UiPage.ADD_APPS)
+            }
+            addText("TRANG ${addAppsPage + 1} / $pageCount · ${apps.size} ỨNG DỤNG",
+                650f, 875f, 620f, 42f, 17f, muted, true, Gravity.CENTER)
+            if (addAppsPage < pageCount - 1) pageButton("SAU ›", 1360f, 870f, 220f, 54f) {
+                addAppsPage++
+                navigateTo(UiPage.ADD_APPS)
+            }
+        } else {
+            addText("${apps.size} ỨNG DỤNG ĐÃ CÀI ĐẶT",
+                650f, 875f, 620f, 42f, 17f, muted, true, Gravity.CENTER)
+        }
+        pageButton("HOÀN TẤT · ${selectedPackages.size} ỨNG DỤNG", 730f, 960f, 460f, 64f) {
+            navigateTo(UiPage.HUB)
+        }
+    }
+
+    private fun buildSettingsPage() {
+        buildPageHeader("CÀI ĐẶT", "Tùy chỉnh giao diện và quyền hoạt động của APX MOUSE")
+        val settings = listOf(
+            Triple("Giao diện", "Tối · Gaming", "Giao diện tối ưu cho màn hình chơi game"),
+            Triple("Quản lý quyền", "Kiểm tra quyền", "Trạng thái overlay · usage · notification · Shizuku"),
+            Triple("Hiệu ứng neon", if (prefs.getBoolean("neon_enabled", true)) "Bật" else "Tắt", "Bật hoặc tắt hiệu ứng nhấn"),
+            Triple("Độ mạnh ánh sáng", prefs.getString("neon_strength", "Trung bình") ?: "Trung bình", "Thấp · Trung bình · Cao"),
+            Triple("Kiểu chuyển app", prefs.getString("app_transition", "Trượt") ?: "Trượt", "Trượt · Mờ dần")
+        )
+        settings.forEachIndexed { index, item ->
+            val y = 235f + index * 132f
+            val card = addPanel(220f, y, 1480f, 108f,
+                intArrayOf(Color.rgb(19, 46, 78), Color.rgb(8, 21, 42)), 18f)
+            addText(item.first, 260f, y + 16f, 620f, 36f, 23f, white, true)
+            addText(item.third, 260f, y + 58f, 900f, 28f, 15f, muted, false)
+            val value = addText(item.second, 1250f, y + 20f, 390f, 60f, 19f, blue, true, Gravity.CENTER)
+            val action = {
+                when (index) {
+                    0 -> toast("Giao diện Tối · Gaming là giao diện mặc định của APX MOUSE")
+                    1 -> showPermissionManager()
+                    2 -> {
+                        prefs.edit().putBoolean("neon_enabled",
+                            !prefs.getBoolean("neon_enabled", true)).apply()
+                        navigateTo(UiPage.SETTINGS)
+                    }
+                    3 -> {
+                        val values = arrayOf("Thấp", "Trung bình", "Cao")
+                        val current = prefs.getString("neon_strength", "Trung bình")
+                        val next = values[(values.indexOf(current).coerceAtLeast(0) + 1) % values.size]
+                        prefs.edit().putString("neon_strength", next).apply()
+                        navigateTo(UiPage.SETTINGS)
+                    }
+                    4 -> {
+                        val values = arrayOf("Trượt", "Mờ dần")
+                        val current = prefs.getString("app_transition", "Trượt")
+                        val next = values[(values.indexOf(current).coerceAtLeast(0) + 1) % values.size]
+                        prefs.edit().putString("app_transition", next).apply()
+                        navigateTo(UiPage.SETTINGS)
+                    }
+                }
+            }
+            addClick(card, action)
+            addClick(value, action)
+        }
+        pageButton("CHẨN ĐOÁN CHUỘT / BÀN PHÍM", 710f, 920f, 500f, 64f) { startActivity(Intent(this, InputDiagnosticsActivity::class.java)) }
+    }
+
+    private fun showPermissionManager() {
+        val overlay = if (Settings.canDrawOverlays(this)) "ĐÃ CẤP" else "CHƯA CẤP"
+        val usage = if (hasUsageAccess()) "ĐÃ CẤP" else "CHƯA CẤP"
+        val notifications = if (Build.VERSION.SDK_INT < 33 ||
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        ) "ĐÃ CẤP" else "CHƯA CẤP"
+        val shizuku = when {
+            !Shizuku.pingBinder() -> "CHƯA KẾT NỐI"
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> "ĐÃ CẤP"
+            else -> "CHƯA CẤP"
+        }
+        val options = arrayOf(
+            "Hiển thị trên ứng dụng khác · $overlay",
+            "Truy cập dữ liệu sử dụng · $usage",
+            "Thông báo · $notifications",
+            "Shizuku · $shizuku"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Quản lý quyền APX MOUSE")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> startActivity(Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:$packageName")
+                    ))
+                    1 -> startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    2 -> {
+                        if (Build.VERSION.SDK_INT >= 26) {
+                            startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                        }
+                    }
+                    3 -> requestShizukuPermission()
+                }
+            }
+            .setNegativeButton("Đóng", null)
+            .show()
+    }
+
+    private fun buildAppDetailsPage() {
+        buildPageHeader("CHI TIẾT ỨNG DỤNG", selectedGameLabel())
+        val packageName = selectedPackage
+        if (packageName == null || packageManager.getLaunchIntentForPackage(packageName) == null) {
+            addText("Chưa chọn ứng dụng", 500f, 420f, 920f, 70f, 28f, muted, true, Gravity.CENTER)
+            pageButton("QUAY LẠI GAME SPACE", 720f, 560f, 480f, 72f) { navigateTo(UiPage.HUB) }
+            return
+        }
+        val info = packageManager.getApplicationInfo(packageName, 0)
+        val label = packageManager.getApplicationLabel(info).toString()
+        val icon = ImageView(this).apply {
+            setImageDrawable(packageManager.getApplicationIcon(info))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = label
+        }
+        addAt(icon, 520f, 320f, 180f, 180f)
+        addText(label, 750f, 330f, 700f, 70f, 34f, white, true)
+        addText("SẴN SÀNG MỞ", 755f, 410f, 500f, 38f, 17f, green, true)
+        pageButton("MỞ ỨNG DỤNG", 620f, 610f, 300f, 76f) { launchSelectedApp(packageName) }
+        pageButton("XÓA KHỎI KHU VỰC", 970f, 610f, 330f, 76f) {
+            confirmRemoveApp(packageName, label)
+            navigateTo(UiPage.HUB)
+        }
+        pageButton("CHỌN HỒ SƠ GAME", 760f, 760f, 400f, 68f) {
+            navigateTo(UiPage.GAME_SELECTION)
+        }
     }
 
     private fun showAppPicker() {
@@ -137,12 +501,12 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun getLaunchableApps(): List<ResolveInfo> {
+    private fun getLaunchableApps(includeSystemApps: Boolean = prefs.getBoolean(KEY_SHOW_SYSTEM_APPS, false)): List<ResolveInfo> {
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         return packageManager.queryIntentActivities(launcherIntent, 0)
             .filter { it.activityInfo.packageName != packageName }
             .filter {
-                prefs.getBoolean(KEY_SHOW_SYSTEM_APPS, false) ||
+                includeSystemApps ||
                     (it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0
             }
             .distinctBy { it.activityInfo.packageName }
@@ -151,6 +515,8 @@ class MainActivity : Activity() {
 
     private fun renderGameSpace(animateFromRight: Boolean = false) {
         dynamicViews.forEach { view ->
+            // Stop any in-flight property animation before detaching recycled page views.
+            view.animate().cancel()
             canvas.removeView(view)
             placements.removeAll { it.view === view }
             if (view is TextView) textSizes.remove(view)
@@ -170,13 +536,17 @@ class MainActivity : Activity() {
             val y = 320f + row * 260f
             val panel = addDynamicPanel(x, y, 590f, 220f, intArrayOf(Color.rgb(24, 62, 105), Color.rgb(9, 24, 48)), 24f)
             panel.isClickable = true
-            panel.setOnClickListener { launchSelectedApp(packageName) }
+            panel.isFocusable = true
+            panel.contentDescription = "Mở $label trong Game Space. Nhấn giữ để xóa khỏi danh sách."
+            panel.setOnClickListener { selectedPackage = packageName; navigateTo(UiPage.APP_DETAILS) }
             panel.setOnLongClickListener { confirmRemoveApp(packageName, label); true }
             val icon = ImageView(this).apply {
                 setImageDrawable(packageManager.getApplicationIcon(info))
                 scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = label
                 isClickable = true
-                setOnClickListener { launchSelectedApp(packageName) }
+                isFocusable = true
+                setOnClickListener { selectedPackage = packageName; navigateTo(UiPage.APP_DETAILS) }
             }
             dynamicViews += icon
             addAt(icon, x + 28f, y + 56f, 108f, 108f)
@@ -185,7 +555,7 @@ class MainActivity : Activity() {
             val open = addDynamicText("MỞ ỨNG DỤNG  →", x + 158f, y + 156f, 380f, 34f, 18f, blue, true)
             listOf(name, subtitle, open).forEach { item ->
                 item.isClickable = true
-                item.setOnClickListener { launchSelectedApp(packageName) }
+                item.setOnClickListener { selectedPackage = packageName; navigateTo(UiPage.APP_DETAILS) }
                 item.setOnLongClickListener { confirmRemoveApp(packageName, label); true }
             }
         }
@@ -206,9 +576,14 @@ class MainActivity : Activity() {
         }
         layoutCanvas()
         if (animateFromRight) dynamicViews.forEach { item ->
-            item.translationX = 28f
-            item.alpha = 0.7f
-            item.animate().translationX(0f).alpha(1f).setDuration(50L).start()
+            item.translationX = 20f
+            item.alpha = 0f
+            item.animate()
+                .translationX(0f)
+                .alpha(1f)
+                .setDuration(PAGE_TRANSITION_DURATION_MS)
+                .setInterpolator(DecelerateInterpolator(1.5f))
+                .start()
         }
     }
 
@@ -301,10 +676,18 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun addPanel(x: Float, y: Float, width: Float, height: Float, colors: IntArray, radius: Float): View {
+    private fun addPanel(
+        x: Float,
+        y: Float,
+        width: Float,
+        height: Float,
+        colors: IntArray,
+        radius: Float,
+        neonBorder: Boolean = false
+    ): View {
         val view = View(this)
-        backgroundViews[view] = Pair(colors, radius)
-        view.background = gradient(colors, radius)
+        backgroundViews[view] = PanelStyle(colors, radius, neonBorder)
+        view.background = gradient(colors, radius, neonBorder)
         addAt(view, x, y, width, height)
         return view
     }
@@ -332,7 +715,7 @@ class MainActivity : Activity() {
     private fun addDynamicPanel(x: Float, y: Float, width: Float, height: Float, colors: IntArray, radius: Float): View {
         val view = View(this)
         dynamicViews += view
-        backgroundViews[view] = Pair(colors, radius)
+        backgroundViews[view] = PanelStyle(colors, radius)
         view.background = gradient(colors, radius)
         addAt(view, x, y, width, height)
         return view
@@ -355,6 +738,34 @@ class MainActivity : Activity() {
     private fun addClick(view: View, action: () -> Unit) {
         view.isClickable = true
         view.isFocusable = true
+        view.setOnTouchListener { target, event ->
+            if (prefs.getBoolean("neon_enabled", true)) {
+                val intensity = prefs.getString("neon_strength", "Trung bình")
+                val scale = when (intensity) {
+                    "Thấp" -> 0.99f
+                    "Cao" -> 0.95f
+                    else -> 0.97f
+                }
+                val alpha = when (intensity) {
+                    "Thấp" -> 0.93f
+                    "Cao" -> 0.76f
+                    else -> 0.85f
+                }
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        target.animate().cancel()
+                        target.animate().scaleX(scale).scaleY(scale).alpha(alpha)
+                            .translationZ(8f).setDuration(55L).start()
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        target.animate().cancel()
+                        target.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                            .translationZ(0f).setDuration(110L).start()
+                    }
+                }
+            }
+            false
+        }
         view.setOnClickListener { action() }
     }
 
@@ -379,14 +790,30 @@ class MainActivity : Activity() {
             if (item.view is TextView) {
                 textSizes[item.view]?.let { item.view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, it * scale * 1.16f) }
             }
-            backgroundViews[item.view]?.let { (colors, radius) ->
-                item.view.background = gradient(colors, radius * scale)
+            backgroundViews[item.view]?.let { style ->
+                item.view.background = gradient(
+                    style.colors,
+                    style.radius * scale,
+                    style.neonBorder,
+                    scale
+                )
             }
         }
     }
 
-    private fun gradient(colors: IntArray, radius: Float) =
-        GradientDrawable(GradientDrawable.Orientation.TL_BR, colors).apply { cornerRadius = radius }
+    private fun gradient(colors: IntArray, radius: Float, neonBorder: Boolean = false, scale: Float = 1f) =
+        GradientDrawable(GradientDrawable.Orientation.TL_BR, colors).apply {
+            cornerRadius = radius
+            if (neonBorder && prefs.getBoolean("neon_enabled", true)) {
+                val strength = prefs.getString("neon_strength", "Trung bình")
+                val (alpha, width) = when (strength) {
+                    "Thấp" -> 75 to 1f
+                    "Cao" -> 220 to 3f
+                    else -> 145 to 2f
+                }
+                setStroke((width * scale).toInt().coerceAtLeast(1), Color.argb(alpha, 64, 145, 255))
+            }
+        }
 
     private fun rounded(color: Int, radius: Float) =
         GradientDrawable().apply { setColor(color); cornerRadius = radius }
@@ -418,7 +845,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         updateShizukuStatus()
-        if (::canvas.isInitialized) renderGameSpace()
+        if (::canvas.isInitialized && currentPage == UiPage.HUB) renderGameSpace()
     }
 
     override fun onDestroy() {
@@ -448,8 +875,37 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun shizukuIdentityLabel(): String {
+        if (!runCatching { Shizuku.pingBinder() }.getOrDefault(false)) return "CHƯA KẾT NỐI"
+        return when (runCatching { Shizuku.getUid() }.getOrNull()) {
+            0 -> "ROOT · UID 0"
+            2000 -> "ADB SHELL · UID 2000"
+            else -> "ĐÃ KẾT NỐI · UID KHÁC"
+        }
+    }
+
+    private fun showShizukuIdentityInfo() {
+        if (!Shizuku.pingBinder()) {
+            toast("Shizuku chưa chạy. Hãy kết nối Shizuku trước.")
+            return
+        }
+        val uid = runCatching { Shizuku.getUid() }.getOrNull()
+        val message = when (uid) {
+            0 -> "Shizuku hiện chạy với UID 0 (Root)."
+            2000 -> "Shizuku hiện chạy với UID 2000 (ADB shell). Đây không phải Root; một số quyền hệ thống vẫn bị giới hạn."
+            null -> "Không đọc được UID của phiên Shizuku."
+            else -> "Phiên Shizuku hiện có UID $uid."
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Kiểu quyền hiện tại")
+            .setMessage(message + "\nAPX MOUSE không tự nâng quyền và không tự bật Root.")
+            .setPositiveButton("Đóng", null)
+            .show()
+    }
+
     private fun updateShizukuStatus() {
         if (!::shizukuStatus.isInitialized) return
+        if (::rootAccessStatus.isInitialized) rootAccessStatus.text = shizukuIdentityLabel()
         val running = Shizuku.pingBinder()
         val granted = running && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         when {
@@ -477,9 +933,11 @@ class MainActivity : Activity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     companion object {
+        private const val PAGE_TRANSITION_DURATION_MS = 190L
         private const val SHIZUKU_REQUEST_CODE = 2301
         private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
         private const val KEY_SELECTED_APPS = "selected_apps"
+        private const val KEY_SELECTED_GAME = "selected_game"
         private const val KEY_SHOW_SYSTEM_APPS = "show_system_apps"
     }
 }

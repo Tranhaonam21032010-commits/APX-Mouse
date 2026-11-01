@@ -3,22 +3,17 @@ package com.apx.mouse
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import rikka.shizuku.Shizuku
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Conservative Shizuku shell backend.
+ * Shizuku shell backend for discrete taps and serialized multi-pointer touch frames.
  *
- * Current supported operation: a discrete single-pointer tap using Android's
- * public shell "input tap" command. This is NOT a continuous touch stream and
- * does NOT provide drag, pointer concurrency, mouse-look, or multi-touch.
- *
- * Never reports unsupported operations as successful. A future native/user
- * service backend can implement the same interface after device testing.
+ * Touch injection is performed by the Shizuku UserService process through Android's
+ * InputManager API. Device/API permission support must be verified on the target phone.
  */
 class ShizukuInputBackend(
     private val listener: Listener
@@ -35,28 +30,32 @@ class ShizukuInputBackend(
         val shellInputAvailable: Boolean?,
         val supportsContinuousTouch: Boolean = false,
         val supportsMultiTouch: Boolean = false,
-        val detail: String
+        val detail: String,
+        val touchApiAvailable: Boolean = false
     )
 
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val closed = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
+    // Accessed only on executor to preserve Android pointer ordering.
+    private val touchState = TouchFrameState()
+    private var gestureDownTime = 0L
 
     override fun onCommand(command: InputEngine.TouchCommand) {
+        if (closed.get()) return
         when (command) {
-            is InputEngine.TouchCommand.Down -> sendTap(command.x, command.y)
-            is InputEngine.TouchCommand.Up -> Unit // input tap already sends DOWN+UP.
+            is InputEngine.TouchCommand.Down ->
+                enqueueTouch { sendFrame(touchState.down(command.pointer, command.x, command.y)) }
             is InputEngine.TouchCommand.Move ->
-                postStatus("Chưa hỗ trợ kéo/di chuyển cảm ứng liên tục.")
-            is InputEngine.TouchCommand.AimDelta ->
-                postStatus("Chưa hỗ trợ chuyển động ngắm liên tục.")
-            is InputEngine.TouchCommand.Joystick ->
-                if (command.x != 0f || command.y != 0f) {
-                    postStatus("Chưa hỗ trợ giữ joystick hoặc đa điểm chạm.")
-                }
+                enqueueTouch { sendFrame(touchState.move(command.pointer, command.x, command.y)) }
+            is InputEngine.TouchCommand.Up ->
+                enqueueTouch { sendFrame(touchState.up(command.pointer)) }
+            // Continuous movement is translated into explicit pointer MOVE frames by InputEngine.
+            is InputEngine.TouchCommand.AimDelta -> Unit
+            is InputEngine.TouchCommand.Joystick -> Unit
+            // Wheel mapping is intentionally not assigned a game action until the user configures one.
             is InputEngine.TouchCommand.Wheel -> Unit
-            is InputEngine.TouchCommand.KeyState ->
-                postStatus("Bàn phím hiện chỉ được phân tích trong InputEngine; chưa inject sang game.")
+            is InputEngine.TouchCommand.KeyState -> Unit
         }
     }
 
@@ -71,22 +70,30 @@ class ShizukuInputBackend(
                 val result = DisplayScaleController.execute("command -v input")
                 result.success && !result.output.contains("ERROR:")
             } else null
-
+            val touchProbe = if (granted) DisplayScaleController.probeTouchInjection()
+                else DisplayScaleController.Result(false, "Shizuku chưa được cấp quyền")
+            val touchSupported = touchProbe.success
             val detail = when {
                 !running -> "Shizuku chưa chạy."
                 !granted -> "Shizuku chưa cấp quyền cho APX MOUSE."
-                shellAvailable == true -> "Shell input có sẵn. Hiện chỉ xác nhận được lệnh tap đơn."
-                else -> "Không tìm thấy lệnh input hoặc shell không cho phép chạy."
+                !touchSupported -> "Chưa xác nhận được API inject touch: ${touchProbe.output}"
+                else -> "Đã tìm thấy API inject touch. Cần thử trên thiết bị để xác nhận quyền và đa điểm chạm."
             }
-            val result = Capability(running, granted, shellAvailable, detail = detail)
-            mainHandler.post { callback(result) }
+            val result = Capability(
+                shizukuRunning = running,
+                permissionGranted = granted,
+                shellInputAvailable = shellAvailable,
+                // API presence alone does not prove that this device grants injection permission.
+                supportsContinuousTouch = false,
+                supportsMultiTouch = false,
+                detail = detail,
+                touchApiAvailable = touchSupported
+            )
+            mainHandler.post { if (!closed.get()) callback(result) }
         }
     }
 
-    /**
-     * A discrete tap only. Coordinates are validated before being passed to
-     * the shell; no command text is accepted from external input.
-     */
+    /** Explicit one-shot tap retained for diagnostics and simple actions. */
     fun sendTap(x: Float, y: Float) {
         if (closed.get()) return
         if (!x.isFinite() || !y.isFinite() || x < 0f || y < 0f) {
@@ -95,26 +102,73 @@ class ShizukuInputBackend(
         }
         executor.execute {
             try {
-                if (!Shizuku.pingBinder() ||
-                    Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED
-                ) {
+                if (!hasShizukuPermission()) {
                     postTapResult(false, "Shizuku chưa chạy hoặc chưa được cấp quyền.")
                     return@execute
                 }
-
                 val xi = x.toInt()
                 val yi = y.toInt()
                 val result = DisplayScaleController.execute("input tap $xi $yi")
-                if (result.success) {
-                    postTapResult(true, "Đã gửi lệnh tap tại ($xi, $yi).")
+                postTapResult(result.success, if (result.success) {
+                    "Đã gửi lệnh tap tại ($xi, $yi)."
                 } else {
-                    postTapResult(false, "Lệnh tap thất bại: ${result.output}")
-                }
+                    "Lệnh tap thất bại: ${result.output}"
+                })
             } catch (t: Throwable) {
                 postTapResult(false, "Không thể gửi tap: ${t.message ?: t.javaClass.simpleName}")
             }
         }
     }
+
+    private fun enqueueTouch(block: () -> Unit) {
+        runCatching { executor.execute { if (!closed.get()) block() } }
+            .onFailure { postStatus("Không thể xếp hàng touch frame: ${it.message}") }
+    }
+
+    private fun sendFrame(frame: TouchFrameState.Frame?) {
+        if (frame == null) return
+        if (frame.action == TouchFrameState.ACTION_DOWN) {
+            gestureDownTime = SystemClock.uptimeMillis()
+        }
+        if (gestureDownTime <= 0L) {
+            postStatus("Bỏ qua touch frame vì thiếu downTime.")
+            touchState.cancel()
+            return
+        }
+
+        val pointers = frame.pointers
+        val result = DisplayScaleController.injectTouchFrame(
+            action = frame.action,
+            pointerIds = pointers.map { it.id }.toIntArray(),
+            xs = pointers.map { it.x }.toFloatArray(),
+            ys = pointers.map { it.y }.toFloatArray(),
+            downTime = gestureDownTime,
+            eventTime = SystemClock.uptimeMillis()
+        )
+        if (!result.success) {
+            postStatus("Inject touch thất bại: ${result.output}")
+            // Best-effort cancellation prevents a partially delivered gesture sticking.
+            val cancel = touchState.cancel()
+            if (cancel != null) {
+                DisplayScaleController.injectTouchFrame(
+                    cancel.action,
+                    cancel.pointers.map { it.id }.toIntArray(),
+                    cancel.pointers.map { it.x }.toFloatArray(),
+                    cancel.pointers.map { it.y }.toFloatArray(),
+                    gestureDownTime,
+                    SystemClock.uptimeMillis()
+                )
+            }
+            gestureDownTime = 0L
+            return
+        }
+        frame.releasedPointerId?.let { touchState.finishUp(it) }
+        if (touchState.activeCount() == 0) gestureDownTime = 0L
+    }
+
+    private fun hasShizukuPermission(): Boolean =
+        Shizuku.pingBinder() &&
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
 
     private fun postStatus(message: String) {
         mainHandler.post { if (!closed.get()) listener.onStatus(message) }
@@ -127,6 +181,25 @@ class ShizukuInputBackend(
     }
 
     override fun close() {
-        if (closed.compareAndSet(false, true)) executor.shutdownNow()
+        if (closed.compareAndSet(false, true)) {
+            // Send best-effort ACTION_CANCEL before stopping the serial worker.
+            runCatching {
+                executor.execute {
+                    val cancel = touchState.cancel()
+                    if (cancel != null && gestureDownTime > 0L) {
+                        DisplayScaleController.injectTouchFrame(
+                            cancel.action,
+                            cancel.pointers.map { it.id }.toIntArray(),
+                            cancel.pointers.map { it.x }.toFloatArray(),
+                            cancel.pointers.map { it.y }.toFloatArray(),
+                            gestureDownTime,
+                            SystemClock.uptimeMillis()
+                        )
+                    }
+                    gestureDownTime = 0L
+                }
+                executor.shutdown()
+            }.onFailure { executor.shutdownNow() }
+        }
     }
 }
