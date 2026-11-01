@@ -216,7 +216,8 @@ class InputDiagnosticsActivity : Activity() {
             val mouse = description.contains("REL_X") && description.contains("REL_Y")
             val keyboard = description.contains("KEY_A") &&
                 (description.contains("KEY_W") || description.contains("KEY_SPACE"))
-            result += InputDeviceItem(currentPath, name, keyboard, mouse)
+            // Exclude touchscreen, volume and unrelated system input nodes by default.
+            if (keyboard || mouse) result += InputDeviceItem(currentPath, name, keyboard, mouse)
         }
 
         raw.lineSequence().forEach { line ->
