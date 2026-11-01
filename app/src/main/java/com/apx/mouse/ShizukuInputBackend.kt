@@ -30,7 +30,8 @@ class ShizukuInputBackend(
         val shellInputAvailable: Boolean?,
         val supportsContinuousTouch: Boolean = false,
         val supportsMultiTouch: Boolean = false,
-        val detail: String
+        val detail: String,
+        val touchApiAvailable: Boolean = false
     )
 
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -88,9 +89,11 @@ class ShizukuInputBackend(
                 shizukuRunning = running,
                 permissionGranted = granted,
                 shellInputAvailable = shellAvailable,
-                supportsContinuousTouch = touchSupported,
-                supportsMultiTouch = touchSupported,
-                detail = detail
+                // API presence alone does not prove that this device grants injection permission.
+                supportsContinuousTouch = false,
+                supportsMultiTouch = false,
+                detail = detail,
+                touchApiAvailable = touchSupported
             )
             mainHandler.post { if (!closed.get()) callback(result) }
         }
