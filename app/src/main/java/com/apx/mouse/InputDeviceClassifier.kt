@@ -80,6 +80,39 @@ internal object InputDeviceClassifier {
             }
         }
         flush()
-        return result.distinctBy { it.path }.sortedBy { it.path }
+        val procDevices = parseProcInventory(raw)
+        return (result + procDevices).distinctBy { it.path }.sortedBy { it.path }
+    }
+
+    /**
+     * Fallback for devices listed in /proc/bus/input/devices when getevent -pl
+     * omits or formats capability blocks differently.
+     */
+    private fun parseProcInventory(raw: String): List<Device> {
+        val devices = mutableListOf<Device>()
+        raw.split(Regex("""\n\s*\n""")).forEach { block ->
+            val nameMatch = Regex("""(?m)^N:\s*Name="?([^\n"]+)"?\s*$""").find(block)
+                ?: return@forEach
+            val eventNumber = Regex("""(?m)^H:\s*Handlers=.*?\bevent(\d+)\b""")
+                .find(block)?.groupValues?.get(1) ?: return@forEach
+            val name = nameMatch.groupValues[1].trim().ifBlank { "Thiết bị không tên" }
+            val handlers = Regex("""(?m)^H:\s*Handlers=(.*)$""")
+                .find(block)?.groupValues?.get(1).orEmpty().lowercase()
+            val normalizedName = name.lowercase()
+            val keyboard = Regex("""\b(keyboard|keypad)\b""").containsMatchIn(normalizedName) ||
+                Regex("""\bkbd\b""").containsMatchIn(handlers)
+            val mouse = Regex("""\b(mouse\d*|trackball\d*|touchpad\d*)\b""")
+                .containsMatchIn(handlers) ||
+                Regex("""\b(mouse|trackball|touchpad)\b""").containsMatchIn(normalizedName)
+            if (keyboard || mouse) {
+                devices += Device(
+                    path = "/dev/input/event$eventNumber",
+                    name = name,
+                    isKeyboard = keyboard,
+                    isMouse = mouse
+                )
+            }
+        }
+        return devices
     }
 }
