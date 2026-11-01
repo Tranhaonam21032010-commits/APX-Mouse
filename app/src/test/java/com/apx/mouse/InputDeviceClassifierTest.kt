@@ -27,6 +27,20 @@ class InputDeviceClassifierTest {
         assertEquals(true, devices[1].isMouse)
     }
 
+    @Test fun recognizesKeyboardWhenGeteventWrapsKeyCapabilitiesAcrossLines() {
+        val inventory = """
+            add device 1: /dev/input/event8
+              name: "USB Keyboard"
+              events:
+                KEY (0001): 0000 0001 0002 0003
+                          0004 0005 001e 0011 001f 0020
+                          (KEY_RESERVED KEY_ESC KEY_1 KEY_2 KEY_3 KEY_4 KEY_A KEY_W KEY_S KEY_D)
+        """.trimIndent()
+
+        val device = InputDeviceClassifier.parse(inventory).single()
+        assertEquals(true, device.isKeyboard)
+    }
+
     @Test fun comboDeviceIsReportedAsComboWithoutRandomClassification() {
         val inventory = """
             add device 1: /dev/input/event3
