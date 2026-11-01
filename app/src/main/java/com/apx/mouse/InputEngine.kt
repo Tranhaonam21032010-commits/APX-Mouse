@@ -27,6 +27,15 @@ class InputEngine(
         val enabled: Boolean = true
     )
 
+    data class JoystickDirection(val x: Float, val y: Float)
+
+    private val defaultJoystickDirections = mapOf(
+        KeyEvent.KEYCODE_W to JoystickDirection(0f, -1f),
+        KeyEvent.KEYCODE_A to JoystickDirection(-1f, 0f),
+        KeyEvent.KEYCODE_S to JoystickDirection(0f, 1f),
+        KeyEvent.KEYCODE_D to JoystickDirection(1f, 0f)
+    )
+
     data class Config(
         val screenWidth: Int = 0,
         val screenHeight: Int = 0,
@@ -42,6 +51,13 @@ class InputEngine(
         val movementKeys: Set<Int> = setOf(
             KeyEvent.KEYCODE_W, KeyEvent.KEYCODE_A,
             KeyEvent.KEYCODE_S, KeyEvent.KEYCODE_D
+        ),
+        /** Direction vector for each configurable joystick key. */
+        val joystickDirections: Map<Int, JoystickDirection> = mapOf(
+            KeyEvent.KEYCODE_W to JoystickDirection(0f, -1f),
+            KeyEvent.KEYCODE_A to JoystickDirection(-1f, 0f),
+            KeyEvent.KEYCODE_S to JoystickDirection(0f, 1f),
+            KeyEvent.KEYCODE_D to JoystickDirection(1f, 0f)
         ),
         /** Per-game points saved by MappingEditor, including KEYCODE_BUTTON_1..5. */
         val keyBindings: Map<Int, MouseButtonBinding> = emptyMap(),
@@ -302,10 +318,13 @@ class InputEngine(
     private fun updateJoystick() {
         var x = 0f
         var y = 0f
-        if (KeyEvent.KEYCODE_A in pressedKeys) x -= 1f
-        if (KeyEvent.KEYCODE_D in pressedKeys) x += 1f
-        if (KeyEvent.KEYCODE_W in pressedKeys) y -= 1f
-        if (KeyEvent.KEYCODE_S in pressedKeys) y += 1f
+        currentConfig.movementKeys.forEach { keyCode ->
+            if (keyCode in pressedKeys) {
+                val direction = currentConfig.joystickDirections[keyCode] ?: return@forEach
+                x += direction.x
+                y += direction.y
+            }
+        }
 
         val length = hypot(x, y)
         if (length > 1f) {
