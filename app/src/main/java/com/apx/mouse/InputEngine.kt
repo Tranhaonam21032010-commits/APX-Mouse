@@ -66,6 +66,7 @@ class InputEngine(
 
     private val pressedKeys = linkedSetOf<Int>()
     private val activeMouseButtons = linkedSetOf<Int>()
+    private val activePointerPositions = mutableMapOf<Int, Pair<Float, Float>>()
     private var currentConfig = config
     private var enabled = true
     private var lastMouseX = Float.NaN
@@ -155,7 +156,10 @@ class InputEngine(
                     dx = smoothedDx
                     dy = smoothedDy
                 }
-                if (dx != 0f || dy != 0f) sink.onCommand(TouchCommand.AimDelta(dx, dy))
+                if (dx != 0f || dy != 0f) {
+                    sink.onCommand(TouchCommand.AimDelta(dx, dy))
+                    moveActivePointers(dx, dy)
+                }
             }
             MotionEvent.ACTION_SCROLL -> {
                 val horizontal = event.getAxisValue(MotionEvent.AXIS_HSCROLL) *
@@ -184,9 +188,11 @@ class InputEngine(
         if (event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS) {
             if (activeMouseButtons.add(buttonCode)) {
                 val point = normalizedPoint(binding.x, binding.y)
+                activePointerPositions[binding.pointerId] = point
                 sink.onCommand(TouchCommand.Down(binding.pointerId, point.first, point.second))
             }
         } else if (activeMouseButtons.remove(buttonCode)) {
+            activePointerPositions.remove(binding.pointerId)
             sink.onCommand(TouchCommand.Up(binding.pointerId))
         }
         return true
@@ -204,10 +210,12 @@ class InputEngine(
             if (isDown && !wasDown) {
                 activeMouseButtons.add(buttonCode)
                 val point = normalizedPoint(binding.x, binding.y)
+                activePointerPositions[binding.pointerId] = point
                 sink.onCommand(TouchCommand.Down(binding.pointerId, point.first, point.second))
                 handled = true
             } else if (!isDown && wasDown) {
                 activeMouseButtons.remove(buttonCode)
+                activePointerPositions.remove(binding.pointerId)
                 sink.onCommand(TouchCommand.Up(binding.pointerId))
                 handled = true
             }
@@ -244,6 +252,22 @@ class InputEngine(
         }
     }
 
+    /** Moves every currently held mapped pointer, allowing mouse-held drag gestures. */
+    private fun moveActivePointers(dx: Float, dy: Float) {
+        val maxX = (currentConfig.screenWidth - 1).coerceAtLeast(0).toFloat()
+        val maxY = (currentConfig.screenHeight - 1).coerceAtLeast(0).toFloat()
+        activeMouseButtons.toList().forEach { buttonCode ->
+            val binding = currentConfig.mouseButtons[buttonCode] ?: return@forEach
+            val current = activePointerPositions[binding.pointerId] ?: return@forEach
+            val next = (current.first + dx).coerceIn(0f, maxX) to
+                (current.second + dy).coerceIn(0f, maxY)
+            if (next != current) {
+                activePointerPositions[binding.pointerId] = next
+                sink.onCommand(TouchCommand.Move(binding.pointerId, next.first, next.second))
+            }
+        }
+    }
+
     private fun normalizedPoint(x: Float, y: Float): Pair<Float, Float> {
         val width = currentConfig.screenWidth.coerceAtLeast(1).toFloat()
         val height = currentConfig.screenHeight.coerceAtLeast(1).toFloat()
@@ -255,6 +279,7 @@ class InputEngine(
             currentConfig.mouseButtons[code]?.let { sink.onCommand(TouchCommand.Up(it.pointerId)) }
         }
         activeMouseButtons.clear()
+        activePointerPositions.clear()
         pressedKeys.toList().forEach { code ->
             sink.onCommand(TouchCommand.KeyState(code, false, 0, 0, 0, 0))
         }
