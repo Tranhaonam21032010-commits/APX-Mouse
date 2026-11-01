@@ -40,6 +40,7 @@ class InputDiagnosticsActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("apx_mouse", MODE_PRIVATE) }
     private var devices: List<InputDeviceItem> = emptyList()
     private var selectedPaths = emptySet<String>()
+    private var selectedDeviceIds = emptySet<String>()
     private lateinit var output: TextView
     private lateinit var status: TextView
     private lateinit var captureSwitch: Switch
@@ -50,6 +51,7 @@ class InputDiagnosticsActivity : Activity() {
         window.statusBarColor = Color.rgb(7, 12, 27)
         window.navigationBarColor = Color.rgb(7, 12, 27)
         selectedPaths = prefs.getStringSet(KEY_INPUT_PATHS, emptySet())?.toSet() ?: emptySet()
+        selectedDeviceIds = prefs.getStringSet(KEY_INPUT_DEVICE_IDS, emptySet())?.toSet() ?: emptySet()
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -147,7 +149,11 @@ class InputDiagnosticsActivity : Activity() {
                 status.text = if (result.success) "Quét xong. Chọn thiết bị chuột / bàn phím." else result.output
                 output.text = result.output
                 devices = parseDevices(result.output)
-                selectedPaths = selectedPaths.intersect(devices.map { it.path }.toSet())
+                selectedPaths = if (selectedDeviceIds.isNotEmpty()) {
+                    devices.filter { deviceIdentity(it) in selectedDeviceIds }.map { it.path }.toSet()
+                } else {
+                    selectedPaths.intersect(devices.map { it.path }.toSet())
+                }
                 saveSelection()
                 updateSelectedSummary()
                 if (devices.isEmpty() && result.success) {
@@ -213,8 +219,16 @@ class InputDiagnosticsActivity : Activity() {
             )
         }
 
+    private fun deviceIdentity(device: InputDeviceItem): String =
+        "${device.name.trim().lowercase()}|${device.isKeyboard}|${device.isMouse}"
+
     private fun saveSelection() {
-        prefs.edit().putStringSet(KEY_INPUT_PATHS, selectedPaths).apply()
+        selectedDeviceIds = devices.filter { it.path in selectedPaths }
+            .map { deviceIdentity(it) }.toSet()
+        prefs.edit()
+            .putStringSet(KEY_INPUT_PATHS, selectedPaths)
+            .putStringSet(KEY_INPUT_DEVICE_IDS, selectedDeviceIds)
+            .apply()
     }
 
     private fun updateSelectedSummary() {
@@ -232,6 +246,7 @@ class InputDiagnosticsActivity : Activity() {
 
     companion object {
         private const val KEY_INPUT_PATHS = "input_event_paths"
+        private const val KEY_INPUT_DEVICE_IDS = "input_device_ids"
         private const val KEY_INPUT_ENABLED = "input_capture_enabled"
     }
 }
