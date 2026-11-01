@@ -19,7 +19,10 @@ object DisplayScaleController {
     private const val KEY_DENSITY = "display_original_density"
     private const val KEY_SIZE_OVERRIDE = "display_original_size_override"
     private const val KEY_DENSITY_OVERRIDE = "display_original_density_override"
-    private const val SERVICE_VERSION = 4
+    private const val KEY_ROTATION_CAPTURED = "display_rotation_original_captured"
+    private const val KEY_ROTATION_AUTO = "display_rotation_original_auto"
+    private const val KEY_ROTATION_USER = "display_rotation_original_user"
+    private const val SERVICE_VERSION = 5
 
     data class Result(val success: Boolean, val output: String)
 
@@ -181,6 +184,66 @@ object DisplayScaleController {
         } catch (e: Exception) { Result(false, "Lỗi đọc sự kiện: ${e.message}") }
     }
 
+    fun captureOriginalRotation(context: Context): Result {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_ROTATION_CAPTURED, false)) {
+            return Result(true, "Đã lưu cài đặt xoay màn hình gốc")
+        }
+        val auto = execute("settings get system accelerometer_rotation")
+        if (!auto.success) return auto
+        val user = execute("settings get system user_rotation")
+        if (!user.success) return user
+        val autoValue = auto.output.trim()
+        val userValue = user.output.trim()
+        if (autoValue !in setOf("0", "1", "null") ||
+            userValue !in setOf("0", "1", "2", "3", "null")
+        ) return Result(false, "Không đọc được trạng thái xoay gốc: $autoValue / $userValue")
+        prefs.edit()
+            .putString(KEY_ROTATION_AUTO, autoValue)
+            .putString(KEY_ROTATION_USER, userValue)
+            .putBoolean(KEY_ROTATION_CAPTURED, true)
+            .apply()
+        return Result(true, "Đã lưu cài đặt xoay màn hình gốc")
+    }
+
+    /** rotation: 0=0°, 1=90°, 2=180°, 3=270°. */
+    fun applyRotation(context: Context, rotation: Int): Result {
+        if (rotation !in 0..3) return Result(false, "Góc xoay phải là 0°, 90°, 180° hoặc 270°")
+        val captured = captureOriginalRotation(context)
+        if (!captured.success) return captured
+        val lock = execute("settings put system accelerometer_rotation 0")
+        if (!lock.success) return lock
+        val applied = execute("settings put system user_rotation $rotation")
+        if (!applied.success) {
+            restoreRotation(context)
+            return Result(false, "Không áp dụng được góc xoay: ${applied.output}")
+        }
+        return Result(true, "Đã khóa góc xoay ở ${rotation * 90}°")
+    }
+
+    fun restoreRotation(context: Context): Result {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(KEY_ROTATION_CAPTURED, false)) {
+            return Result(true, "Không có cài đặt xoay tạm để khôi phục")
+        }
+        val auto = prefs.getString(KEY_ROTATION_AUTO, "null") ?: "null"
+        val user = prefs.getString(KEY_ROTATION_USER, "null") ?: "null"
+        val userResult = if (user == "null") {
+            execute("settings delete system user_rotation")
+        } else {
+            execute("settings put system user_rotation $user")
+        }
+        if (!userResult.success) return userResult
+        val autoResult = if (auto == "null") {
+            execute("settings delete system accelerometer_rotation")
+        } else {
+            execute("settings put system accelerometer_rotation $auto")
+        }
+        if (!autoResult.success) return autoResult
+        prefs.edit().putBoolean(KEY_ROTATION_CAPTURED, false).apply()
+        return Result(true, "Đã khôi phục chế độ xoay màn hình ban đầu")
+    }
+
     fun captureOriginal(context: Context): Result {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (prefs.getBoolean(KEY_CAPTURED, false)) return Result(true, "Đã lưu thông số màn hình gốc")
@@ -227,26 +290,31 @@ object DisplayScaleController {
 
     fun restore(context: Context): Result {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(KEY_CAPTURED, false))
-            return Result(true, "Chưa có cấu hình màn hình tạm để khôi phục")
-        val width = prefs.getInt(KEY_WIDTH, 0)
-        val height = prefs.getInt(KEY_HEIGHT, 0)
-        val dpi = prefs.getInt(KEY_DENSITY, 0)
-        if (width <= 0 || height <= 0 || dpi <= 0)
-            return Result(false, "Dữ liệu cấu hình gốc không hợp lệ")
-        val size = if (prefs.getBoolean(KEY_SIZE_OVERRIDE, false))
-            execute("wm size ${width}x${height}") else execute("wm size reset")
-        if (!size.success) return size
-        val density = if (prefs.getBoolean(KEY_DENSITY_OVERRIDE, false))
-            execute("wm density $dpi") else execute("wm density reset")
-        if (!density.success) return density
-        prefs.edit().putBoolean(KEY_CAPTURED, false).apply()
-        return Result(true, "Đã khôi phục màn hình về ${width}×${height}, ${dpi} DPI")
+        if (prefs.getBoolean(KEY_CAPTURED, false)) {
+            val width = prefs.getInt(KEY_WIDTH, 0)
+            val height = prefs.getInt(KEY_HEIGHT, 0)
+            val dpi = prefs.getInt(KEY_DENSITY, 0)
+            if (width <= 0 || height <= 0 || dpi <= 0)
+                return Result(false, "Dữ liệu cấu hình gốc không hợp lệ")
+            val size = if (prefs.getBoolean(KEY_SIZE_OVERRIDE, false))
+                execute("wm size ${width}x${height}") else execute("wm size reset")
+            if (!size.success) return size
+            val density = if (prefs.getBoolean(KEY_DENSITY_OVERRIDE, false))
+                execute("wm density $dpi") else execute("wm density reset")
+            if (!density.success) return density
+            prefs.edit().putBoolean(KEY_CAPTURED, false).apply()
+        }
+        val rotation = restoreRotation(context)
+        if (!rotation.success) return rotation
+        return Result(true, "Đã khôi phục độ phân giải, DPI và chế độ xoay ban đầu")
     }
 
     fun keep(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_CAPTURED, false).apply()
+            .edit()
+            .putBoolean(KEY_CAPTURED, false)
+            .putBoolean(KEY_ROTATION_CAPTURED, false)
+            .apply()
     }
 
     @Synchronized
