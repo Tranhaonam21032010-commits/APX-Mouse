@@ -47,9 +47,10 @@ class GameOverlayService : Service() {
     private var manuallyHidden = false
     private var mappingRoot: FrameLayout? = null
     private var renderedMapping: String? = null
-    private var editorRoot: FrameLayout? = null
+    @Volatile private var editorRoot: FrameLayout? = null
+    private var editorCaptureArmed = false
     private val editorPoints = mutableListOf<EditorPoint>()
-    private var editorSelected = -1
+    @Volatile private var editorSelected = -1
     private var editorGamePackage = ""
     private var editorCanvas: View? = null
     @Volatile private var gamePackage: String = ""
@@ -93,13 +94,29 @@ class GameOverlayService : Service() {
                     safeLines.forEach { line ->
                         evdevParser.parseLine(line).forEach { event ->
                             when (event) {
-                                is EvdevInputEventParser.Event.Key ->
-                                    engine.onRawKey(event.code, event.pressed)
-                                is EvdevInputEventParser.Event.MouseButton ->
-                                    engine.onRawMouseButton(event.code, event.pressed)
+                                is EvdevInputEventParser.Event.Key -> {
+                                    if (editorRoot != null) {
+                                        if (event.pressed && !event.repeat) {
+                                            evdevKeyCode(event.code)?.let(::assignEditorKey)
+                                        }
+                                    } else {
+                                        engine.onRawKey(event.code, event.pressed)
+                                    }
+                                }
+                                is EvdevInputEventParser.Event.MouseButton -> {
+                                    if (editorRoot != null) {
+                                        if (event.pressed) {
+                                            evdevMouseButtonKeyCode(event.code)?.let(::assignEditorKey)
+                                        }
+                                    } else {
+                                        engine.onRawMouseButton(event.code, event.pressed)
+                                    }
+                                }
                                 is EvdevInputEventParser.Event.Relative -> {
-                                    engine.onRawMouseMotion(event.dx, event.dy)
-                                    engine.onRawWheel(event.wheelX, event.wheelY)
+                                    if (editorRoot == null) {
+                                        engine.onRawMouseMotion(event.dx, event.dy)
+                                        engine.onRawWheel(event.wheelX, event.wheelY)
+                                    }
                                 }
                             }
                         }
@@ -913,12 +930,63 @@ class GameOverlayService : Service() {
 
     private data class EditorPoint(var x: Float, var y: Float, var keyCode: Int = KeyEvent.KEYCODE_UNKNOWN)
 
+    /** Map Linux evdev key names to Android key codes while the in-game editor is armed. */
+    private fun evdevKeyCode(evdevName: String): Int? {
+        if (!evdevName.startsWith("KEY_")) return null
+        val suffix = evdevName.removePrefix("KEY_")
+        val androidName = when (suffix) {
+            "ESC" -> "ESCAPE"
+            "BACKSPACE" -> "DEL"
+            "DELETE" -> "FORWARD_DEL"
+            "LEFTSHIFT" -> "SHIFT_LEFT"
+            "RIGHTSHIFT" -> "SHIFT_RIGHT"
+            "LEFTCTRL" -> "CTRL_LEFT"
+            "RIGHTCTRL" -> "CTRL_RIGHT"
+            "LEFTALT" -> "ALT_LEFT"
+            "RIGHTALT" -> "ALT_RIGHT"
+            "LEFTMETA" -> "META_LEFT"
+            "RIGHTMETA" -> "META_RIGHT"
+            "CAPSLOCK" -> "CAPS_LOCK"
+            "PAGEUP" -> "PAGE_UP"
+            "PAGEDOWN" -> "PAGE_DOWN"
+            "UP" -> "DPAD_UP"
+            "DOWN" -> "DPAD_DOWN"
+            "LEFT" -> "DPAD_LEFT"
+            "RIGHT" -> "DPAD_RIGHT"
+            "KPENTER" -> "NUMPAD_ENTER"
+            else -> suffix
+        }
+        return KeyEvent.keyCodeFromString("KEYCODE_$androidName")
+            .takeIf { it != KeyEvent.KEYCODE_UNKNOWN }
+    }
+
+    private fun evdevMouseButtonKeyCode(evdevName: String): Int? = when (evdevName) {
+        "BTN_LEFT" -> KeyEvent.KEYCODE_BUTTON_1
+        "BTN_RIGHT" -> KeyEvent.KEYCODE_BUTTON_2
+        "BTN_MIDDLE" -> KeyEvent.KEYCODE_BUTTON_3
+        "BTN_SIDE" -> KeyEvent.KEYCODE_BUTTON_4
+        "BTN_EXTRA" -> KeyEvent.KEYCODE_BUTTON_5
+        else -> null
+    }
+
+    private fun assignEditorKey(keyCode: Int) {
+        handler.post {
+            if (editorRoot == null || !editorCaptureArmed ||
+                editorSelected !in editorPoints.indices
+            ) return@post
+            editorPoints[editorSelected].keyCode = keyCode
+            editorCaptureArmed = false
+            editorCanvas?.invalidate()
+        }
+    }
+
     private fun openMappingEditor() {
         setFanOpen(false)
         if (editorRoot != null) { closeMappingEditor(); return }
         editorGamePackage = gamePackage
         editorPoints.clear()
         editorSelected = -1
+        editorCaptureArmed = false
         val raw = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE).getString(KEY_PREFIX + editorGamePackage, null)
         try {
             if (!raw.isNullOrBlank()) {
@@ -938,8 +1006,7 @@ class GameOverlayService : Service() {
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                 if (event.action == KeyEvent.ACTION_DOWN && editorSelected in editorPoints.indices &&
                     event.keyCode != KeyEvent.KEYCODE_BACK) {
-                    editorPoints[editorSelected].keyCode = event.keyCode
-                    editorCanvas?.invalidate()
+                    assignEditorKey(event.keyCode)
                     return true
                 }
                 if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
@@ -986,11 +1053,24 @@ class GameOverlayService : Service() {
                             dx * dx + dy * dy < dp(34) * dp(34).toFloat()
                         }
                         if (hit == null) {
-                            editorPoints.add(EditorPoint((e.x / width.coerceAtLeast(1)).coerceIn(0f, 1f),
-                                (e.y / height.coerceAtLeast(1)).coerceIn(0f, 1f)))
-                            editorSelected = editorPoints.lastIndex
+                            if (editorPoints.size < MAX_MAPPED_POINTS) {
+                                editorPoints.add(EditorPoint((e.x / width.coerceAtLeast(1)).coerceIn(0f, 1f),
+                                    (e.y / height.coerceAtLeast(1)).coerceIn(0f, 1f)))
+                                editorSelected = editorPoints.lastIndex
+                                editorCaptureArmed = true
+                            } else {
+                                android.widget.Toast.makeText(
+                                    this@GameOverlayService,
+                                    "Tối đa $MAX_MAPPED_POINTS điểm; một điểm được dành cho joystick",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
                             dragging = false
-                        } else { editorSelected = hit; dragging = true }
+                        } else {
+                            editorSelected = hit
+                            editorCaptureArmed = hit != null
+                            dragging = true
+                        }
                         invalidate()
                         root.requestFocus()
                         return true
@@ -1027,16 +1107,32 @@ class GameOverlayService : Service() {
             }, LinearLayout.LayoutParams(-2, dp(42)))
         }
         tool("＋ Thêm") {
-            editorPoints.add(EditorPoint(0.5f, 0.5f)); editorSelected = editorPoints.lastIndex; canvas.invalidate()
+            if (editorPoints.size >= MAX_MAPPED_POINTS) {
+                android.widget.Toast.makeText(
+                    this@GameOverlayService,
+                    "Tối đa $MAX_MAPPED_POINTS điểm; một điểm được dành cho joystick",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                editorPoints.add(EditorPoint(0.5f, 0.5f))
+                editorSelected = editorPoints.lastIndex
+                editorCaptureArmed = true
+                canvas.invalidate()
+            }
         }
         tool("Xóa") {
             if (editorSelected in editorPoints.indices) {
-                editorPoints.removeAt(editorSelected); editorSelected = -1; canvas.invalidate()
+                editorPoints.removeAt(editorSelected)
+                editorSelected = -1
+                editorCaptureArmed = false
+                canvas.invalidate()
             }
         }
         tool("Bỏ gán") {
             if (editorSelected in editorPoints.indices) {
-                editorPoints[editorSelected].keyCode = KeyEvent.KEYCODE_UNKNOWN; canvas.invalidate()
+                editorPoints[editorSelected].keyCode = KeyEvent.KEYCODE_UNKNOWN
+                editorCaptureArmed = true
+                canvas.invalidate()
             }
         }
         tool("Lưu") { saveEditorMappings() }
@@ -1045,7 +1141,7 @@ class GameOverlayService : Service() {
             topMargin = dp(8)
         })
         val hint = TextView(this).apply {
-            text = "Chạm vị trí trong game để thêm nút · Kéo để di chuyển · Chọn nút rồi nhấn phím"
+            text = "Chạm vị trí để thêm · Kéo để di chuyển · Chọn điểm rồi bấm phím hoặc nút chuột để gán (tối đa 9 điểm)"
             textSize = 11f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             setPadding(dp(8), dp(5), dp(8), dp(5))
             background = GradientDrawable().apply {
@@ -1064,6 +1160,7 @@ class GameOverlayService : Service() {
         try {
             windowManager.addView(root, params)
             editorRoot = root
+            inputDispatchExecutor.execute { inputEngine?.reset() }
             bubbleRoot?.visibility = View.GONE
             root.requestFocus()
         } catch (_: Exception) { editorRoot = null; editorCanvas = null }
@@ -1086,12 +1183,13 @@ class GameOverlayService : Service() {
             .putBoolean(VISIBLE_PREFIX + editorGamePackage, true).apply()
         renderedMapping = null
         editorCanvas?.invalidate()
-        android.widget.Toast.makeText(this, "Đã lưu \${editorPoints.size} nút", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(this, "Đã lưu ${editorPoints.size} nút", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun closeMappingEditor(refreshOverlay: Boolean = true) {
         editorRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         editorRoot = null
+        editorCaptureArmed = false
         editorCanvas = null
         renderedMapping = null
         if (serviceActive.get()) bubbleRoot?.visibility = View.VISIBLE
