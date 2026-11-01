@@ -17,7 +17,6 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
     private val inputCaptureLock = Any()
     @Volatile private var inputCaptureProcess: Process? = null
     @Volatile private var inputCaptureThread: Thread? = null
-    @Volatile private var inputCaptureListener: IInputEventListener? = null
 
     override fun destroy() {
         stopInputCapture()
@@ -102,7 +101,7 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
         ) return "ERROR: Chọn từ 1 đến 8 thiết bị input hợp lệ"
 
         synchronized(inputCaptureLock) {
-            if (inputCaptureProcess?.isAlive == true) {
+            if (inputCaptureProcess != null) {
                 return "ERROR: Phiên đọc input đang chạy"
             }
 
@@ -114,7 +113,6 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
             }
 
             inputCaptureProcess = process
-            inputCaptureListener = listener
             val reader = Thread(
                 { readInputCapture(process, listener) },
                 "APX-EvdevInputReader"
@@ -126,20 +124,21 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
     }
 
     override fun stopInputCapture(): String {
-        val process: Process?
-        synchronized(inputCaptureLock) {
-            process = inputCaptureProcess
+        val session = synchronized(inputCaptureLock) {
+            val current = inputCaptureProcess to inputCaptureThread
             inputCaptureProcess = null
             inputCaptureThread = null
-            inputCaptureListener = null
+            current
         }
-        if (process == null) return "OK: Không có phiên input đang chạy"
+        val process = session.first ?: return "OK: Không có phiên input đang chạy"
         return try {
             process.destroy()
-            if (!process.waitFor(300, TimeUnit.MILLISECONDS)) process.destroyForcibly()
-            "OK: Đã dừng đọc input"
+            // Process.waitFor(timeout) and destroyForcibly are not available on every
+            // supported Android release; joining the reader is sufficient after destroy().
+            session.second?.join(400L)
+            "OK: Đã gửi lệnh dừng getevent"
         } catch (e: Exception) {
-            process.destroyForcibly()
+            process.destroy()
             "ERROR: Không dừng được getevent: ${e.message ?: e.javaClass.simpleName}"
         }
     }
@@ -180,7 +179,6 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
                 if (inputCaptureProcess === process) {
                     inputCaptureProcess = null
                     inputCaptureThread = null
-                    inputCaptureListener = null
                 }
             }
             runCatching { listener.onInputCaptureEnded(completion) }
