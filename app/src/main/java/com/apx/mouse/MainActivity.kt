@@ -17,6 +17,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -85,11 +86,17 @@ class MainActivity : Activity() {
         addText("APX MOUSE", 54f, 42f, 420f, 66f, 40f, white, true)
         addText("GAMING CONTROL CENTER", 58f, 108f, 420f, 28f, 15f, muted, true)
         val addAppButton = addPanel(1650f, 48f, 82f, 82f, intArrayOf(Color.rgb(20, 55, 96), Color.rgb(10, 28, 52)), 18f)
+        addAppButton.contentDescription = "Thêm ứng dụng vào Game Space"
         addClick(addAppButton) { showAppPicker() }
-        addClick(addText("+", 1650f, 48f, 82f, 82f, 42f, blue, true, Gravity.CENTER)) { showAppPicker() }
+        val addAppIcon = addText("+", 1650f, 48f, 82f, 82f, 42f, blue, true, Gravity.CENTER)
+        addAppIcon.contentDescription = "Thêm ứng dụng vào Game Space"
+        addClick(addAppIcon) { showAppPicker() }
         val settingsButton = addPanel(1760f, 48f, 82f, 82f, intArrayOf(Color.rgb(20, 48, 86), Color.rgb(12, 27, 53)), 18f)
+        settingsButton.contentDescription = "Mở cài đặt"
         addClick(settingsButton) { showSettings() }
-        addClick(addText("⚙", 1760f, 48f, 82f, 82f, 34f, blue, true, Gravity.CENTER)) { showSettings() }
+        val settingsIcon = addText("⚙", 1760f, 48f, 82f, 82f, 34f, blue, true, Gravity.CENTER)
+        settingsIcon.contentDescription = "Mở cài đặt"
+        addClick(settingsIcon) { showSettings() }
         addPanel(60f, 164f, 1380f, 850f, intArrayOf(Color.rgb(18, 39, 72), Color.rgb(7, 15, 32), Color.rgb(12, 27, 52)), 30f)
         addText("TRÒ CHƠI CỦA BẠN", 112f, 202f, 650f, 48f, 27f, white, true)
         addText("Chọn ứng dụng để mở nhanh · Vuốt ngang để chuyển trang", 114f, 253f, 900f, 34f, 18f, muted, false)
@@ -151,6 +158,8 @@ class MainActivity : Activity() {
 
     private fun renderGameSpace(animateFromRight: Boolean = false) {
         dynamicViews.forEach { view ->
+            // Stop any in-flight property animation before detaching recycled page views.
+            view.animate().cancel()
             canvas.removeView(view)
             placements.removeAll { it.view === view }
             if (view is TextView) textSizes.remove(view)
@@ -170,12 +179,16 @@ class MainActivity : Activity() {
             val y = 320f + row * 260f
             val panel = addDynamicPanel(x, y, 590f, 220f, intArrayOf(Color.rgb(24, 62, 105), Color.rgb(9, 24, 48)), 24f)
             panel.isClickable = true
+            panel.isFocusable = true
+            panel.contentDescription = "Mở $label trong Game Space. Nhấn giữ để xóa khỏi danh sách."
             panel.setOnClickListener { launchSelectedApp(packageName) }
             panel.setOnLongClickListener { confirmRemoveApp(packageName, label); true }
             val icon = ImageView(this).apply {
                 setImageDrawable(packageManager.getApplicationIcon(info))
                 scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = label
                 isClickable = true
+                isFocusable = true
                 setOnClickListener { launchSelectedApp(packageName) }
             }
             dynamicViews += icon
@@ -206,9 +219,14 @@ class MainActivity : Activity() {
         }
         layoutCanvas()
         if (animateFromRight) dynamicViews.forEach { item ->
-            item.translationX = 28f
-            item.alpha = 0.7f
-            item.animate().translationX(0f).alpha(1f).setDuration(50L).start()
+            item.translationX = 20f
+            item.alpha = 0f
+            item.animate()
+                .translationX(0f)
+                .alpha(1f)
+                .setDuration(PAGE_TRANSITION_DURATION_MS)
+                .setInterpolator(DecelerateInterpolator(1.5f))
+                .start()
         }
     }
 
@@ -477,6 +495,7 @@ class MainActivity : Activity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     companion object {
+        private const val PAGE_TRANSITION_DURATION_MS = 190L
         private const val SHIZUKU_REQUEST_CODE = 2301
         private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
         private const val KEY_SELECTED_APPS = "selected_apps"
