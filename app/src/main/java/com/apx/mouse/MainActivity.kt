@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private val dynamicViews = mutableListOf<View>()
     private val emptyStateViews = mutableListOf<View>()
     private var appPage = 0
+    private var addAppsPage = 0
     private var swipeStartX = 0f
     private var swipeStartY = 0f
     private var pagingGesture = false
@@ -68,6 +69,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        selectedGame = prefs.getString(KEY_SELECTED_GAME, "Đấu Trường") ?: "Đấu Trường"
         window.statusBarColor = canvasBackground
         window.navigationBarColor = canvasBackground
         canvas = FrameLayout(this).apply { setBackgroundColor(canvasBackground) }
@@ -185,9 +187,14 @@ class MainActivity : Activity() {
             val colors = if (active) intArrayOf(Color.rgb(23, 105, 155), Color.rgb(10, 43, 75))
                 else intArrayOf(Color.rgb(22, 48, 82), Color.rgb(8, 21, 42))
             val card = addPanel(x, 340f, 460f, 300f, colors, 26f)
-            addClick(card) { selectedGame = game; navigateTo(UiPage.GAME_SELECTION) }
+            val selectGame = {
+                selectedGame = game
+                prefs.edit().putString(KEY_SELECTED_GAME, game).apply()
+                navigateTo(UiPage.GAME_SELECTION)
+            }
+            addClick(card, selectGame)
             val title = addText(game, x + 28f, 410f, 404f, 64f, 32f, white, true, Gravity.CENTER)
-            addClick(title) { selectedGame = game; navigateTo(UiPage.GAME_SELECTION) }
+            addClick(title, selectGame)
             val state = if (active) "ĐANG CHỌN" else "CHỌN HỒ SƠ"
             addText(state, x + 28f, 500f, 404f, 38f, 17f,
                 if (active) green else muted, true, Gravity.CENTER)
@@ -197,14 +204,16 @@ class MainActivity : Activity() {
     }
 
     private fun buildAddAppsPage() {
-        buildPageHeader("THÊM ỨNG DỤNG", "Chọn ứng dụng muốn xuất hiện trong Game Space · Chạm để thêm hoặc bỏ")
+        buildPageHeader("THÊM ỨNG DỤNG", "Chọn ứng dụng muốn xuất hiện trong Game Space · Duyệt toàn bộ ứng dụng theo trang")
         val apps = getLaunchableApps()
         if (apps.isEmpty()) {
             addText("Không tìm thấy ứng dụng có thể mở", 400f, 430f, 1120f, 70f,
                 26f, muted, false, Gravity.CENTER)
             return
         }
-        apps.take(12).forEachIndexed { index, app ->
+        val pageCount = ((apps.size + 11) / 12).coerceAtLeast(1)
+        addAppsPage = addAppsPage.coerceIn(0, pageCount - 1)
+        apps.drop(addAppsPage * 12).take(12).forEachIndexed { index, app ->
             val packageName = app.activityInfo.packageName
             val label = app.loadLabel(packageManager).toString()
             val selected = selectedPackages.contains(packageName)
@@ -234,7 +243,23 @@ class MainActivity : Activity() {
                 x + 125f, y + 92f, 270f, 40f, 15f,
                 if (selected) green else blue, true)
         }
-        pageButton("HOÀN TẤT · ${selectedPackages.size} ỨNG DỤNG", 730f, 900f, 460f, 70f) {
+
+        if (pageCount > 1) {
+            if (addAppsPage > 0) pageButton("‹ TRƯỚC", 340f, 870f, 220f, 54f) {
+                addAppsPage--
+                navigateTo(UiPage.ADD_APPS)
+            }
+            addText("TRANG ${addAppsPage + 1} / $pageCount · ${apps.size} ỨNG DỤNG",
+                650f, 875f, 620f, 42f, 17f, muted, true, Gravity.CENTER)
+            if (addAppsPage < pageCount - 1) pageButton("SAU ›", 1360f, 870f, 220f, 54f) {
+                addAppsPage++
+                navigateTo(UiPage.ADD_APPS)
+            }
+        } else {
+            addText("${apps.size} ỨNG DỤNG ĐÃ CÀI ĐẶT",
+                650f, 875f, 620f, 42f, 17f, muted, true, Gravity.CENTER)
+        }
+        pageButton("HOÀN TẤT · ${selectedPackages.size} ỨNG DỤNG", 730f, 960f, 460f, 64f) {
             navigateTo(UiPage.HUB)
         }
     }
@@ -696,6 +721,7 @@ class MainActivity : Activity() {
         private const val SHIZUKU_REQUEST_CODE = 2301
         private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
         private const val KEY_SELECTED_APPS = "selected_apps"
+        private const val KEY_SELECTED_GAME = "selected_game"
         private const val KEY_SHOW_SYSTEM_APPS = "show_system_apps"
     }
 }
