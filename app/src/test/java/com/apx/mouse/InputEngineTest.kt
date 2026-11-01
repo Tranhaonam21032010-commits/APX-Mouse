@@ -156,14 +156,14 @@ class InputEngineTest {
                 screenWidth = 1000,
                 screenHeight = 500,
                 keyBindings = mapOf(
-                    KeyEvent.KEYCODE_BUTTON_1 to InputEngine.MouseButtonBinding(3, 0.4f, 0.6f)
+                    KeyEvent.KEYCODE_BUTTON_1 to InputEngine.MouseButtonBinding(3, 0.5f, 0.5f)
                 )
             )
         )
 
         assertTrue(engine.syncMouseButtonState(android.view.MotionEvent.BUTTON_PRIMARY))
         assertEquals(
-            InputEngine.TouchCommand.Down(3, 399.6f, 299.4f),
+            InputEngine.TouchCommand.Down(3, 499.5f, 249.5f),
             sink.commands.first()
         )
         assertTrue(engine.syncMouseButtonState(0))
