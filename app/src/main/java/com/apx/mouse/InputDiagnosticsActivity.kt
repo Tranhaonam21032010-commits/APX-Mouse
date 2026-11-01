@@ -203,40 +203,15 @@ class InputDiagnosticsActivity : Activity() {
         }
     }
 
-    private fun parseDevices(raw: String): List<InputDeviceItem> {
-        val result = mutableListOf<InputDeviceItem>()
-        val pathPattern = Regex("""add device\s+\d+:\s+(/dev/input/event\d+)""")
-        var path: String? = null
-        var name = "Thiết bị không tên"
-        val block = StringBuilder()
-
-        fun flush() {
-            val currentPath = path ?: return
-            val description = block.toString()
-            val mouse = description.contains("REL_X") && description.contains("REL_Y")
-            val keyboard = description.contains("KEY_A") &&
-                (description.contains("KEY_W") || description.contains("KEY_SPACE"))
-            // Exclude touchscreen, volume and unrelated system input nodes by default.
-            if (keyboard || mouse) result += InputDeviceItem(currentPath, name, keyboard, mouse)
+    private fun parseDevices(raw: String): List<InputDeviceItem> =
+        InputDeviceClassifier.parse(raw).map { device ->
+            InputDeviceItem(
+                path = device.path,
+                name = device.name,
+                isKeyboard = device.isKeyboard,
+                isMouse = device.isMouse
+            )
         }
-
-        raw.lineSequence().forEach { line ->
-            val newPath = pathPattern.find(line)?.groupValues?.getOrNull(1)
-            if (newPath != null) {
-                flush()
-                path = newPath
-                name = "Thiết bị không tên"
-                block.clear()
-            }
-            if (path != null) {
-                block.append(line).append('\n')
-                val foundName = Regex("""name:\s*"([^"]+)"""").find(line)
-                if (foundName != null) name = foundName.groupValues[1]
-            }
-        }
-        flush()
-        return result.distinctBy { it.path }.sortedBy { it.path }
-    }
 
     private fun saveSelection() {
         prefs.edit().putStringSet(KEY_INPUT_PATHS, selectedPaths).apply()
