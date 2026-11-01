@@ -53,10 +53,19 @@ class InputEngineTest {
         assertTrue(engine.onMappedKeyCode(KeyEvent.KEYCODE_W, false))
         assertTrue(engine.onMappedKeyCode(KeyEvent.KEYCODE_D, false))
 
-        assertEquals(InputEngine.TouchCommand.Down(0, 179.82f, 389.22f), sink.commands[0])
+        val firstDown = sink.commands[0] as InputEngine.TouchCommand.Down
+        assertEquals(0, firstDown.pointer)
+        assertEquals(179.82f, firstDown.x, 0.01f)
+        assertEquals(389.22f, firstDown.y, 0.01f)
         assertTrue(sink.commands[1] is InputEngine.TouchCommand.Move)
-        assertTrue(sink.commands[2] is InputEngine.TouchCommand.Move)
-        assertEquals(InputEngine.TouchCommand.Move(0, 239.7f, 329.34f), sink.commands[2])
+        val diagonalMove = sink.commands[2] as InputEngine.TouchCommand.Move
+        val radius = 0.12f * 499f
+        val diagonalOffset = radius / kotlin.math.sqrt(2f)
+        assertEquals(179.82f + diagonalOffset, diagonalMove.x, 0.02f)
+        assertEquals(389.22f - diagonalOffset, diagonalMove.y, 0.02f)
+        val eastMove = sink.commands[3] as InputEngine.TouchCommand.Move
+        assertEquals(239.7f, eastMove.x, 0.02f)
+        assertEquals(389.22f, eastMove.y, 0.02f)
         assertEquals(InputEngine.TouchCommand.Up(0), sink.commands.last())
     }
 
