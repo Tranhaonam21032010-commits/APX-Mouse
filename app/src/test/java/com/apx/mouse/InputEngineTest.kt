@@ -69,6 +69,38 @@ class InputEngineTest {
         assertEquals(InputEngine.TouchCommand.Up(0), sink.commands.last())
     }
 
+    @Test fun customJoystickDirectionsUseConfiguredKeysInsteadOfHardcodedWasd() {
+        val sink = RecordingSink()
+        val engine = InputEngine(
+            sink,
+            InputEngine.Config(
+                screenWidth = 1000,
+                screenHeight = 500,
+                movementKeys = setOf(KeyEvent.KEYCODE_I, KeyEvent.KEYCODE_J, KeyEvent.KEYCODE_K, KeyEvent.KEYCODE_L),
+                joystickDirections = mapOf(
+                    KeyEvent.KEYCODE_I to InputEngine.JoystickDirection(0f, -1f),
+                    KeyEvent.KEYCODE_J to InputEngine.JoystickDirection(-1f, 0f),
+                    KeyEvent.KEYCODE_K to InputEngine.JoystickDirection(0f, 1f),
+                    KeyEvent.KEYCODE_L to InputEngine.JoystickDirection(1f, 0f)
+                )
+            )
+        )
+
+        assertTrue(engine.onMappedKeyCode(KeyEvent.KEYCODE_I, true))
+        assertTrue(engine.onMappedKeyCode(KeyEvent.KEYCODE_L, true))
+        assertTrue(engine.onMappedKeyCode(KeyEvent.KEYCODE_I, false))
+        assertTrue(engine.onMappedKeyCode(KeyEvent.KEYCODE_L, false))
+
+        val down = sink.commands.first() as InputEngine.TouchCommand.Down
+        assertEquals(0, down.pointer)
+        val diagonal = sink.commands[2] as InputEngine.TouchCommand.Move
+        val radius = 0.12f * 499f
+        val offset = radius / kotlin.math.sqrt(2f)
+        assertEquals(179.82f + offset, diagonal.x, 0.02f)
+        assertEquals(389.22f - offset, diagonal.y, 0.02f)
+        assertEquals(InputEngine.TouchCommand.Up(0), sink.commands.last())
+    }
+
     @Test fun mouseButtonHoldMovesItsMappedPointerAndThenReleases() {
         val sink = RecordingSink()
         val engine = InputEngine(
