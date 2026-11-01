@@ -8,7 +8,6 @@ import android.view.InputEvent
 import android.view.MotionEvent
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.util.concurrent.TimeUnit
 
 /**
  * Runs as Shizuku shell/root identity. Only display-related wm commands are accepted.
@@ -67,14 +66,13 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
                 start()
             }
 
-            if (!process.waitFor(timeoutSeconds.coerceAtLeast(1), TimeUnit.SECONDS)) {
+            if (!waitForProcessExit(process, timeoutSeconds.coerceAtLeast(1) * 1000L)) {
                 process.destroy()
-                if (!process.waitFor(300, TimeUnit.MILLISECONDS)) process.destroyForcibly()
-                reader.join(500)
+                reader.join(500L)
                 return "ERROR: Chẩn đoán vượt quá thời gian cho phép"
             }
 
-            reader.join(700)
+            reader.join(700L)
             synchronized(output) {
                 output.toString().take(16000).ifBlank { "(Không có dữ liệu trả về)" }
             }
@@ -282,8 +280,8 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
         return try {
             val process = ProcessBuilder("sh", "-c", normalized).redirectErrorStream(true).start()
             val output = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
-            if (!process.waitFor(4, TimeUnit.SECONDS)) {
-                process.destroyForcibly()
+            if (!waitForProcessExit(process, 4_000L)) {
+                process.destroy()
                 "ERROR: Lệnh quá thời gian"
             } else {
                 val code = process.exitValue()
@@ -291,6 +289,30 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
             }
         } catch (e: Exception) {
             "ERROR: ${e.message ?: "Không chạy được lệnh"}"
+        }
+    }
+
+    /** Uses APIs available on the app's minimum Android API level (24). */
+    private fun waitForProcessExit(process: Process, timeoutMillis: Long): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMillis.coerceAtLeast(1L)
+        while (SystemClock.uptimeMillis() < deadline) {
+            try {
+                process.exitValue()
+                return true
+            } catch (_: IllegalThreadStateException) {
+                try {
+                    Thread.sleep(20L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return false
+                }
+            }
+        }
+        return try {
+            process.exitValue()
+            true
+        } catch (_: IllegalThreadStateException) {
+            false
         }
     }
 }
