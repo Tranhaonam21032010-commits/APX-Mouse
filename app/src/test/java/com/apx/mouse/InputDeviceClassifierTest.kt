@@ -55,6 +55,30 @@ class InputDeviceClassifierTest {
         assertEquals(true, device.isMouse)
     }
 
+    @Test fun fallsBackToProcInputInventoryWhenGeteventCapabilitiesAreMissing() {
+        val inventory = """
+            --- INPUT DEVICES ---
+            I: Bus=0003 Vendor=046d Product=c31c Version=0111
+            N: Name="USB Keyboard"
+            H: Handlers=sysrq kbd leds event6
+            B: EV=120013
+            B: KEY=10000 7f 0 0 0 0
+
+            I: Bus=0003 Vendor=046d Product=c077 Version=0111
+            N: Name="USB Optical Mouse"
+            H: Handlers=mouse0 event9
+            B: EV=17
+            B: REL=903
+        """.trimIndent()
+
+        val devices = InputDeviceClassifier.parse(inventory)
+        assertEquals(2, devices.size)
+        assertEquals("/dev/input/event6", devices[0].path)
+        assertEquals(true, devices[0].isKeyboard)
+        assertEquals("/dev/input/event9", devices[1].path)
+        assertEquals(true, devices[1].isMouse)
+    }
+
     @Test fun doesNotTreatTouchscreenOrMediaKeysAsKeyboardOrMouse() {
         val inventory = """
             add device 1: /dev/input/event1
