@@ -7,7 +7,6 @@ import android.os.SystemClock
 import rikka.shizuku.Shizuku
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Shizuku shell backend for discrete taps and serialized multi-pointer touch frames.
@@ -40,7 +39,6 @@ class ShizukuInputBackend(
     // Accessed only on executor to preserve Android pointer ordering.
     private val touchState = TouchFrameState()
     private var gestureDownTime = 0L
-    private val aimWarningShown = AtomicBoolean(false)
 
     override fun onCommand(command: InputEngine.TouchCommand) {
         if (closed.get()) return
@@ -51,17 +49,12 @@ class ShizukuInputBackend(
                 enqueueTouch { sendFrame(touchState.move(command.pointer, command.x, command.y)) }
             is InputEngine.TouchCommand.Up ->
                 enqueueTouch { sendFrame(touchState.up(command.pointer)) }
-            is InputEngine.TouchCommand.AimDelta ->
-                if (aimWarningShown.compareAndSet(false, true)) {
-                    postStatus("Chưa có cấu hình vùng ngắm riêng; kéo chuột khi đang giữ nút đã được hỗ trợ.")
-                }
-            is InputEngine.TouchCommand.Joystick ->
-                if (command.x != 0f || command.y != 0f) {
-                    postStatus("Joystick cần cấu hình tâm và bán kính vùng chạm trước khi inject.")
-                }
+            // Continuous movement is translated into explicit pointer MOVE frames by InputEngine.
+            is InputEngine.TouchCommand.AimDelta -> Unit
+            is InputEngine.TouchCommand.Joystick -> Unit
+            // Wheel mapping is intentionally not assigned a game action until the user configures one.
             is InputEngine.TouchCommand.Wheel -> Unit
-            is InputEngine.TouchCommand.KeyState ->
-                postStatus("Bàn phím đã được nhận diện nhưng chưa có bộ chuyển mã phím sang game.")
+            is InputEngine.TouchCommand.KeyState -> Unit
         }
     }
 
