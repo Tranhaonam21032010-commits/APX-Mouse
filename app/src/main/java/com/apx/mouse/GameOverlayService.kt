@@ -238,7 +238,7 @@ class GameOverlayService : Service() {
 
         // Compact horizontal status bar: battery, network ping and FPS only.
         val bar = TextView(this).apply {
-            text = "PIN --%    PING --    FPS --"
+            text = "PIN --%    NET --"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -1211,7 +1211,7 @@ class GameOverlayService : Service() {
             lastBatteryReadAt = now
         }
         startNetworkPingIfDue()
-        statsView?.text = "PIN $cachedBatteryText    PING $networkPingText    FPS --"
+        statsView?.text = "PIN $cachedBatteryText    NET $networkPingText"
     }
 
     private fun startNetworkPingIfDue() {
