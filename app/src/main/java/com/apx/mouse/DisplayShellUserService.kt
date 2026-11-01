@@ -1,6 +1,7 @@
 package com.apx.mouse
 
 import android.os.Binder
+import android.os.SystemClock
 import android.os.Build
 import android.view.InputDevice
 import android.view.InputEvent
@@ -13,7 +14,13 @@ import java.util.concurrent.TimeUnit
  * Runs as Shizuku shell/root identity. Only display-related wm commands are accepted.
  */
 class DisplayShellUserService : IDisplayShellService.Stub() {
+    private val inputCaptureLock = Any()
+    @Volatile private var inputCaptureProcess: Process? = null
+    @Volatile private var inputCaptureThread: Thread? = null
+    @Volatile private var inputCaptureListener: IInputEventListener? = null
+
     override fun destroy() {
+        stopInputCapture()
         Thread { System.exit(0) }.start()
     }
 
@@ -75,6 +82,105 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
      * Reports whether this shell process can resolve the platform injection API.
      * This is an API-presence probe, not proof that the device accepts injected events.
      */
+    /**
+     * Streams only explicitly selected /dev/input nodes. The app controls when
+     * capture starts and stops; the reader never writes raw events to disk.
+     */
+    override fun startInputCapture(
+        eventPaths: Array<out String>,
+        listener: IInputEventListener
+    ): String {
+        val paths = eventPaths.map { it.trim() }.distinct()
+        if (paths.isEmpty() || paths.size > 8 ||
+            paths.any { !Regex("/dev/input/event[0-9]{1,3}").matches(it) }
+        ) return "ERROR: Chọn từ 1 đến 8 thiết bị input hợp lệ"
+
+        synchronized(inputCaptureLock) {
+            if (inputCaptureProcess?.isAlive == true) {
+                return "ERROR: Phiên đọc input đang chạy"
+            }
+
+            val command = listOf("getevent", "-lt") + paths
+            val process = try {
+                ProcessBuilder(command).redirectErrorStream(true).start()
+            } catch (e: Exception) {
+                return "ERROR: Không khởi động được getevent: ${e.message ?: e.javaClass.simpleName}"
+            }
+
+            inputCaptureProcess = process
+            inputCaptureListener = listener
+            val reader = Thread(
+                { readInputCapture(process, listener) },
+                "APX-EvdevInputReader"
+            ).apply { isDaemon = true }
+            inputCaptureThread = reader
+            reader.start()
+        }
+        return "OK: Đang đọc ${paths.size} thiết bị input đã chọn"
+    }
+
+    override fun stopInputCapture(): String {
+        val process: Process?
+        synchronized(inputCaptureLock) {
+            process = inputCaptureProcess
+            inputCaptureProcess = null
+            inputCaptureThread = null
+            inputCaptureListener = null
+        }
+        if (process == null) return "OK: Không có phiên input đang chạy"
+        return try {
+            process.destroy()
+            if (!process.waitFor(300, TimeUnit.MILLISECONDS)) process.destroyForcibly()
+            "OK: Đã dừng đọc input"
+        } catch (e: Exception) {
+            process.destroyForcibly()
+            "ERROR: Không dừng được getevent: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    private fun readInputCapture(process: Process, listener: IInputEventListener) {
+        val batch = ArrayList<String>(32)
+        var lastFlushAt = SystemClock.uptimeMillis()
+
+        fun flushBatch() {
+            if (batch.isEmpty()) return
+            val snapshot = batch.toTypedArray()
+            batch.clear()
+            lastFlushAt = SystemClock.uptimeMillis()
+            try {
+                listener.onInputEventBatch(snapshot)
+            } catch (_: Throwable) {
+                process.destroy()
+            }
+        }
+
+        var completion = "Phiên đọc input đã kết thúc"
+        try {
+            process.inputStream.bufferedReader().use { reader ->
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    batch.add(line.take(512))
+                    val now = SystemClock.uptimeMillis()
+                    if (batch.size >= 32 || now - lastFlushAt >= 16L) flushBatch()
+                }
+            }
+            flushBatch()
+            val exitCode = process.waitFor()
+            completion = if (exitCode == 0) "getevent đã dừng" else "getevent kết thúc với mã $exitCode"
+        } catch (e: Exception) {
+            completion = "Lỗi đọc input: ${e.message ?: e.javaClass.simpleName}"
+        } finally {
+            synchronized(inputCaptureLock) {
+                if (inputCaptureProcess === process) {
+                    inputCaptureProcess = null
+                    inputCaptureThread = null
+                    inputCaptureListener = null
+                }
+            }
+            runCatching { listener.onInputCaptureEnded(completion) }
+        }
+    }
+
     override fun probeTouchInjection(): String {
         return try {
             val target = inputManagerTarget()
