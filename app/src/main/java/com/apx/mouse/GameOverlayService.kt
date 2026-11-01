@@ -1215,12 +1215,12 @@ class GameOverlayService : Service() {
             lastBatteryReadAt = now
         }
         startNetworkPingIfDue()
-        statsView?.text = "PIN $cachedBatteryText    NET $networkPingText"
+        statsView?.text = "PIN $cachedBatteryText    PING 1.1.1.1 $networkPingText"
     }
 
     private fun startNetworkPingIfDue() {
         val now = System.currentTimeMillis()
-        if (now - lastPingStartedAt < 5000L || !pingInProgress.compareAndSet(false, true)) return
+        if (now - lastPingStartedAt < NETWORK_PING_INTERVAL_MS || !pingInProgress.compareAndSet(false, true)) return
         lastPingStartedAt = now
         try {
             pingExecutor.execute {
@@ -1438,7 +1438,8 @@ class GameOverlayService : Service() {
     companion object {
         private const val GAME_POLL_INTERVAL_MS = 1_000L
         private const val BACKGROUND_POLL_INTERVAL_MS = 4_000L
-        private const val BATTERY_REFRESH_INTERVAL_MS = 10_000L
+        private const val BATTERY_REFRESH_INTERVAL_MS = 15_000L
+        private const val NETWORK_PING_INTERVAL_MS = 15_000L
         private const val INPUT_RETRY_INTERVAL_MS = 10_000L
         private const val KEY_INPUT_ENABLED = "input_capture_enabled"
         private const val KEY_INPUT_PATHS = "input_event_paths"
