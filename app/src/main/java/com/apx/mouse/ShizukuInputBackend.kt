@@ -168,6 +168,7 @@ class ShizukuInputBackend(
             gestureDownTime = 0L
             return
         }
+        frame.releasedPointerId?.let { touchState.finishUp(it) }
         if (touchState.activeCount() == 0) gestureDownTime = 0L
     }
 
