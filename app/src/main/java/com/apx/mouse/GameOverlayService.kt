@@ -71,6 +71,57 @@ class GameOverlayService : Service() {
     @Volatile private var networkPingText: String = "--"
     private var lastPingStartedAt = 0L
 
+    // Input capture is opt-in and is active only while the selected game is foreground.
+    private val inputControlExecutor = Executors.newSingleThreadExecutor()
+    private val inputDispatchExecutor = Executors.newSingleThreadExecutor()
+    private val inputCaptureStarting = AtomicBoolean(false)
+    @Volatile private var inputSessionAllowed = false
+    @Volatile private var inputSessionActive = false
+    @Volatile private var inputCaptureRunning = false
+    @Volatile private var lastInputStartAttemptAt = 0L
+    @Volatile private var inputEngine: InputEngine? = null
+    @Volatile private var inputBackend: ShizukuInputBackend? = null
+    private val evdevParser = EvdevInputEventParser()
+
+    private val inputEventListener = object : IInputEventListener.Stub() {
+        override fun onInputEventBatch(lines: Array<out String>) {
+            val safeLines = lines.map { it.take(512) }
+            runCatching {
+                inputDispatchExecutor.execute {
+                    if (!inputSessionActive) return@execute
+                    val engine = inputEngine ?: return@execute
+                    safeLines.forEach { line ->
+                        evdevParser.parseLine(line).forEach { event ->
+                            when (event) {
+                                is EvdevInputEventParser.Event.Key ->
+                                    engine.onRawKey(event.code, event.pressed)
+                                is EvdevInputEventParser.Event.MouseButton ->
+                                    engine.onRawMouseButton(event.code, event.pressed)
+                                is EvdevInputEventParser.Event.Relative -> {
+                                    engine.onRawMouseMotion(event.dx, event.dy)
+                                    engine.onRawWheel(event.wheelX, event.wheelY)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        override fun onInputCaptureEnded(message: String) {
+            handler.post {
+                inputCaptureRunning = false
+                if (inputSessionAllowed && serviceActive.get()) {
+                    android.widget.Toast.makeText(
+                        this@GameOverlayService,
+                        "Input Engine đã dừng: ${message.take(120)}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
     private val monitor = object : Runnable {
         override fun run() {
             if (!serviceActive.get()) return
@@ -93,7 +144,13 @@ class GameOverlayService : Service() {
 
                         // Keep the service alive while the player visits Home or another app.
                         val inGame = foreground == gamePackage
-                        if (inGame) outsideGameSince = null
+                        inputSessionAllowed = inGame
+                        if (inGame) {
+                            outsideGameSince = null
+                            startInputCaptureIfEnabled()
+                        } else {
+                            stopInputCapture()
+                        }
                         if (!inGame && scalePreviewPending) closeDisplayScalePanel(restore = true)
                         scaleRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
                         mouseTweakRoot?.visibility = if (inGame) View.VISIBLE else View.GONE
@@ -302,6 +359,151 @@ class GameOverlayService : Service() {
                 item.animate().alpha(0f).scaleX(0.25f).scaleY(0.25f)
                     .setStartDelay(0L).setDuration(50L)
                     .withEndAction { item.visibility = View.GONE }.start()
+            }
+        }
+    }
+
+    private fun startInputCaptureIfEnabled() {
+        if (!inputSessionAllowed || inputCaptureRunning || inputCaptureStarting.get()) return
+        val settings = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+        if (!settings.getBoolean(KEY_INPUT_ENABLED, false)) return
+        val paths = settings.getStringSet(KEY_INPUT_PATHS, emptySet())?.toSet().orEmpty()
+            .filter { Regex("/dev/input/event[0-9]{1,3}").matches(it) }
+            .take(8)
+        if (paths.isEmpty()) return
+
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastInputStartAttemptAt < INPUT_RETRY_INTERVAL_MS) return
+        if (!inputCaptureStarting.compareAndSet(false, true)) return
+        lastInputStartAttemptAt = now
+
+        runCatching {
+            inputControlExecutor.execute {
+                var backend: ShizukuInputBackend? = null
+                try {
+                    if (!inputSessionAllowed || !serviceActive.get()) return@execute
+                    val connection = DisplayScaleController.connect(this@GameOverlayService)
+                    if (!connection.success) {
+                        postInputStatus(connection.output)
+                        return@execute
+                    }
+                    val ready = DisplayScaleController.awaitReady(4_000L)
+                    if (!ready.success) {
+                        postInputStatus(ready.output)
+                        return@execute
+                    }
+
+                    val engineConfig = createGameInputConfig()
+                    backend = ShizukuInputBackend(object : ShizukuInputBackend.Listener {
+                        override fun onStatus(message: String) {
+                            android.util.Log.w("APX-MOUSE-INPUT", message)
+                        }
+                        override fun onTapResult(success: Boolean, message: String) {
+                            if (!success) android.util.Log.w("APX-MOUSE-INPUT", message)
+                        }
+                    })
+                    val engine = InputEngine(backend, engineConfig)
+                    inputBackend = backend
+                    inputEngine = engine
+                    evdevParser.reset()
+                    inputSessionActive = true
+
+                    val result = DisplayScaleController.startInputCapture(
+                        paths.toTypedArray(), inputEventListener
+                    )
+                    if (!result.success) {
+                        inputSessionActive = false
+                        inputEngine = null
+                        inputBackend = null
+                        engine.reset()
+                        backend.close()
+                        postInputStatus(result.output)
+                        return@execute
+                    }
+                    inputCaptureRunning = true
+                    postInputStatus("Đã bật nhận chuột / bàn phím cho phiên game.")
+                } catch (e: Exception) {
+                    inputSessionActive = false
+                    inputEngine = null
+                    inputBackend = null
+                    runCatching { backend?.close() }
+                    postInputStatus("Không thể khởi động Input Engine: ${e.message}")
+                } finally {
+                    inputCaptureStarting.set(false)
+                }
+            }
+        }.onFailure {
+            inputCaptureStarting.set(false)
+            postInputStatus("Không thể xếp lịch Input Engine: ${it.message}")
+        }
+    }
+
+    private fun createGameInputConfig(): InputEngine.Config {
+        val width = resources.displayMetrics.widthPixels.coerceAtLeast(1)
+        val height = resources.displayMetrics.heightPixels.coerceAtLeast(1)
+        val bindings = linkedMapOf<Int, InputEngine.MouseButtonBinding>()
+        val raw = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+            .getString(KEY_PREFIX + gamePackage, null)
+        if (!raw.isNullOrBlank()) {
+            runCatching {
+                val points = JSONArray(raw)
+                for (index in 0 until minOf(points.length(), MAX_MAPPED_POINTS)) {
+                    val item = points.getJSONObject(index)
+                    val keyCode = item.optInt("key", android.view.KeyEvent.KEYCODE_UNKNOWN)
+                    val x = item.optDouble("x", 0.5).toFloat()
+                    val y = item.optDouble("y", 0.5).toFloat()
+                    if (keyCode != android.view.KeyEvent.KEYCODE_UNKNOWN) {
+                        bindings.putIfAbsent(
+                            keyCode,
+                            InputEngine.MouseButtonBinding(
+                                pointerId = index + 1,
+                                x = x.coerceIn(0f, 1f),
+                                y = y.coerceIn(0f, 1f)
+                            )
+                        )
+                    }
+                }
+            }.onFailure {
+                android.util.Log.e("APX-MOUSE-INPUT", "Không đọc được keymap cho game", it)
+            }
+        }
+        val settings = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+        return InputEngine.Config(
+            screenWidth = width,
+            screenHeight = height,
+            joystickCenterX = settings.getFloat("joystick_center_x_$gamePackage", 0.18f),
+            joystickCenterY = settings.getFloat("joystick_center_y_$gamePackage", 0.78f),
+            joystickRadius = settings.getFloat("joystick_radius_$gamePackage", 0.12f),
+            keyBindings = bindings
+        )
+    }
+
+    private fun stopInputCapture() {
+        if (!inputCaptureRunning && !inputCaptureStarting.get() &&
+            inputEngine == null && inputBackend == null
+        ) return
+        inputSessionActive = false
+        runCatching {
+            inputControlExecutor.execute {
+                runCatching { DisplayScaleController.stopInputCapture() }
+                val engine = inputEngine
+                inputEngine = null
+                engine?.reset()
+                val backend = inputBackend
+                inputBackend = null
+                backend?.close()
+                inputCaptureRunning = false
+                runCatching { inputDispatchExecutor.execute { evdevParser.reset() } }
+            }
+        }
+    }
+
+    private fun postInputStatus(message: String) {
+        handler.post {
+            if (inputSessionAllowed && serviceActive.get()) {
+                android.widget.Toast.makeText(
+                    this@GameOverlayService, message, android.widget.Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
@@ -1032,6 +1234,15 @@ class GameOverlayService : Service() {
         handler.removeCallbacksAndMessages(null)
         monitorExecutor.shutdownNow()
         pingExecutor.shutdownNow()
+        inputSessionAllowed = false
+        inputSessionActive = false
+        runCatching { DisplayScaleController.stopInputCapture() }
+        inputEngine?.reset()
+        inputEngine = null
+        inputBackend?.close()
+        inputBackend = null
+        inputControlExecutor.shutdownNow()
+        inputDispatchExecutor.shutdownNow()
         closeDisplayScalePanel(restore = true)
         closeMouseTweak()
         overlayRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
@@ -1054,6 +1265,10 @@ class GameOverlayService : Service() {
         private const val GAME_POLL_INTERVAL_MS = 1_000L
         private const val BACKGROUND_POLL_INTERVAL_MS = 4_000L
         private const val BATTERY_REFRESH_INTERVAL_MS = 10_000L
+        private const val INPUT_RETRY_INTERVAL_MS = 10_000L
+        private const val KEY_INPUT_ENABLED = "input_capture_enabled"
+        private const val KEY_INPUT_PATHS = "input_event_paths"
+        private const val MAX_MAPPED_POINTS = 10
 
         const val EXTRA_GAME_PACKAGE = "extra_game_package"
         private const val CHANNEL_ID = "apx_game_overlay"
