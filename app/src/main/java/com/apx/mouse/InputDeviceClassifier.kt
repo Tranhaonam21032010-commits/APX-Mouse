@@ -25,12 +25,24 @@ internal object InputDeviceClassifier {
 
         fun flush() {
             val currentPath = path ?: return
-            val lines = block.toString().lineSequence().toList()
-            val keyLines = lines.mapNotNull { line ->
-                capabilityLine.find(line)?.takeIf { it.groupValues[1] == "KEY" }?.groupValues?.get(2)
-            }
-            val relLines = lines.mapNotNull { line ->
-                capabilityLine.find(line)?.takeIf { it.groupValues[1] == "REL" }?.groupValues?.get(2)
+            val keyLines = mutableListOf<String>()
+            val relLines = mutableListOf<String>()
+            var activeCapability: String? = null
+            block.toString().lineSequence().forEach { line ->
+                val capability = capabilityLine.find(line)
+                if (capability != null) {
+                    activeCapability = capability.groupValues[1]
+                    val values = capability.groupValues[2]
+                    if (activeCapability == "KEY") keyLines += values
+                    if (activeCapability == "REL") relLines += values
+                } else if (anyCapabilityLine.matches(line)) {
+                    activeCapability = null
+                } else if (activeCapability != null && capabilityContinuation.matches(line)) {
+                    when (activeCapability) {
+                        "KEY" -> keyLines += line.trim()
+                        "REL" -> relLines += line.trim()
+                    }
+                }
             }
             val keyText = keyLines.joinToString(" ")
             val relText = relLines.joinToString(" ")
