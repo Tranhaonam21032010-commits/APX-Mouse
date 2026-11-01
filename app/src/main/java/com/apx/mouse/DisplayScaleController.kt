@@ -81,6 +81,42 @@ object DisplayScaleController {
         }
     }
 
+    fun probeTouchInjection(): Result {
+        val service = shell
+        if (service == null || service.asBinder()?.isBinderAlive != true)
+            return Result(false, bindError ?: "Shizuku UserService chưa sẵn sàng")
+        return try {
+            val output = service.probeTouchInjection().trim()
+            Result(!output.startsWith("ERROR:"), output)
+        } catch (e: Exception) {
+            Result(false, "Lỗi kiểm tra touch injection: ${e.message}")
+        }
+    }
+
+    fun injectTouchFrame(
+        action: Int,
+        pointerIds: IntArray,
+        xs: FloatArray,
+        ys: FloatArray,
+        downTime: Long,
+        eventTime: Long
+    ): Result {
+        val service = shell
+        if (service == null || service.asBinder()?.isBinderAlive != true)
+            return Result(false, bindError ?: "Shizuku UserService chưa sẵn sàng")
+        if (pointerIds.isEmpty() || pointerIds.size > 10 ||
+            pointerIds.size != xs.size || xs.size != ys.size
+        ) return Result(false, "Khung cảm ứng không hợp lệ")
+        return try {
+            val output = service.injectTouchFrame(
+                action, pointerIds, xs, ys, downTime, eventTime
+            ).trim()
+            Result(!output.startsWith("ERROR:"), output)
+        } catch (e: Exception) {
+            Result(false, "Lỗi gửi khung cảm ứng: ${e.message}")
+        }
+    }
+
     fun inputInventory(): Result {
         val service = shell
         if (service == null || service.asBinder()?.isBinderAlive != true)
