@@ -148,6 +148,51 @@ class InputEngineTest {
         assertEquals(InputEngine.TouchCommand.Up(1), sink.commands.last())
     }
 
+    @Test fun androidButtonStateSyncUsesKeyBindingsAsWellAsMouseFallbacks() {
+        val sink = RecordingSink()
+        val engine = InputEngine(
+            sink,
+            InputEngine.Config(
+                screenWidth = 1000,
+                screenHeight = 500,
+                keyBindings = mapOf(
+                    KeyEvent.KEYCODE_BUTTON_1 to InputEngine.MouseButtonBinding(3, 0.4f, 0.6f)
+                )
+            )
+        )
+
+        assertTrue(engine.syncMouseButtonState(android.view.MotionEvent.BUTTON_PRIMARY))
+        assertEquals(
+            InputEngine.TouchCommand.Down(3, 399.6f, 299.4f),
+            sink.commands.first()
+        )
+        assertTrue(engine.syncMouseButtonState(0))
+        assertEquals(InputEngine.TouchCommand.Up(3), sink.commands.last())
+    }
+
+    @Test fun resetDoesNotEmitDuplicateUpForSharedPointerIds() {
+        val sink = RecordingSink()
+        val engine = InputEngine(
+            sink,
+            InputEngine.Config(
+                screenWidth = 1000,
+                screenHeight = 500,
+                keyBindings = mapOf(
+                    KeyEvent.KEYCODE_SPACE to InputEngine.MouseButtonBinding(4, 0.5f, 0.5f)
+                ),
+                mouseButtons = mapOf(
+                    android.view.MotionEvent.BUTTON_PRIMARY to InputEngine.MouseButtonBinding(4, 0.5f, 0.5f)
+                )
+            )
+        )
+
+        engine.onMappedKeyCode(KeyEvent.KEYCODE_SPACE, true)
+        engine.onRawMouseButton("BTN_LEFT", true)
+        engine.reset()
+
+        assertEquals(1, sink.commands.count { it == InputEngine.TouchCommand.Up(4) })
+    }
+
     @Test fun resetReleasesKeyboardAndJoystickPointers() {
         val sink = RecordingSink()
         val engine = InputEngine(
