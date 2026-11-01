@@ -1,5 +1,6 @@
 package com.apx.mouse
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
@@ -27,10 +28,15 @@ import kotlin.math.min
 
 class MainActivity : Activity() {
     private data class Placement(val view: View, val x: Float, val y: Float, val width: Float, val height: Float)
+    private data class PanelStyle(
+        val colors: IntArray,
+        val radius: Float,
+        val neonBorder: Boolean = false
+    )
 
     private val placements = mutableListOf<Placement>()
     private val textSizes = mutableMapOf<TextView, Float>()
-    private val backgroundViews = mutableMapOf<View, Pair<IntArray, Float>>()
+    private val backgroundViews = mutableMapOf<View, PanelStyle>()
     private val dynamicViews = mutableListOf<View>()
     private val emptyStateViews = mutableListOf<View>()
     private var appPage = 0
@@ -179,8 +185,11 @@ class MainActivity : Activity() {
         label: String, x: Float, y: Float, width: Float, height: Float,
         action: () -> Unit
     ) {
-        val panel = addPanel(x, y, width, height,
-            intArrayOf(Color.rgb(24, 72, 118), Color.rgb(10, 31, 58)), 16f)
+        val panel = addPanel(
+            x, y, width, height,
+            intArrayOf(Color.rgb(24, 72, 118), Color.rgb(10, 31, 58)), 16f,
+            neonBorder = prefs.getBoolean("neon_enabled", true)
+        )
         addClick(panel, action)
         val text = addText(label, x + 12f, y + 4f, width - 24f, height - 8f,
             18f, white, true, Gravity.CENTER)
@@ -278,7 +287,7 @@ class MainActivity : Activity() {
         buildPageHeader("CÀI ĐẶT", "Tùy chỉnh giao diện và quyền hoạt động của APX MOUSE")
         val settings = listOf(
             Triple("Giao diện", "Tối · Gaming", "Giao diện tối ưu cho màn hình chơi game"),
-            Triple("Quản lý quyền", "Mở cài đặt quyền", "Kiểm tra quyền hiển thị và quyền truy cập"),
+            Triple("Quản lý quyền", "Kiểm tra quyền", "Trạng thái overlay · usage · notification · Shizuku"),
             Triple("Hiệu ứng neon", if (prefs.getBoolean("neon_enabled", true)) "Bật" else "Tắt", "Bật hoặc tắt hiệu ứng nhấn"),
             Triple("Độ mạnh ánh sáng", prefs.getString("neon_strength", "Trung bình") ?: "Trung bình", "Thấp · Trung bình · Cao"),
             Triple("Kiểu chuyển app", prefs.getString("app_transition", "Trượt") ?: "Trượt", "Trượt · Mờ dần")
@@ -292,7 +301,7 @@ class MainActivity : Activity() {
             val value = addText(item.second, 1250f, y + 20f, 390f, 60f, 19f, blue, true, Gravity.CENTER)
             val action = {
                 when (index) {
-                    0 -> toast("Giao diện Gaming đang được sử dụng")
+                    0 -> toast("Giao diện Tối · Gaming là giao diện mặc định của APX MOUSE")
                     1 -> showPermissionManager()
                     2 -> {
                         prefs.edit().putBoolean("neon_enabled",
@@ -322,10 +331,21 @@ class MainActivity : Activity() {
     }
 
     private fun showPermissionManager() {
+        val overlay = if (Settings.canDrawOverlays(this)) "ĐÃ CẤP" else "CHƯA CẤP"
+        val usage = if (hasUsageAccess()) "ĐÃ CẤP" else "CHƯA CẤP"
+        val notifications = if (Build.VERSION.SDK_INT < 33 ||
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        ) "ĐÃ CẤP" else "CHƯA CẤP"
+        val shizuku = when {
+            !Shizuku.pingBinder() -> "CHƯA KẾT NỐI"
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> "ĐÃ CẤP"
+            else -> "CHƯA CẤP"
+        }
         val options = arrayOf(
-            "Hiển thị trên ứng dụng khác",
-            "Truy cập dữ liệu sử dụng",
-            "Quyền Shizuku"
+            "Hiển thị trên ứng dụng khác · $overlay",
+            "Truy cập dữ liệu sử dụng · $usage",
+            "Thông báo · $notifications",
+            "Shizuku · $shizuku"
         )
         AlertDialog.Builder(this)
             .setTitle("Quản lý quyền APX MOUSE")
@@ -336,7 +356,13 @@ class MainActivity : Activity() {
                         android.net.Uri.parse("package:$packageName")
                     ))
                     1 -> startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                    2 -> requestShizukuPermission()
+                    2 -> {
+                        if (Build.VERSION.SDK_INT >= 26) {
+                            startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                        }
+                    }
+                    3 -> requestShizukuPermission()
                 }
             }
             .setNegativeButton("Đóng", null)
@@ -572,10 +598,18 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun addPanel(x: Float, y: Float, width: Float, height: Float, colors: IntArray, radius: Float): View {
+    private fun addPanel(
+        x: Float,
+        y: Float,
+        width: Float,
+        height: Float,
+        colors: IntArray,
+        radius: Float,
+        neonBorder: Boolean = false
+    ): View {
         val view = View(this)
-        backgroundViews[view] = Pair(colors, radius)
-        view.background = gradient(colors, radius)
+        backgroundViews[view] = PanelStyle(colors, radius, neonBorder)
+        view.background = gradient(colors, radius, neonBorder)
         addAt(view, x, y, width, height)
         return view
     }
@@ -678,14 +712,30 @@ class MainActivity : Activity() {
             if (item.view is TextView) {
                 textSizes[item.view]?.let { item.view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, it * scale * 1.16f) }
             }
-            backgroundViews[item.view]?.let { (colors, radius) ->
-                item.view.background = gradient(colors, radius * scale)
+            backgroundViews[item.view]?.let { style ->
+                item.view.background = gradient(
+                    style.colors,
+                    style.radius * scale,
+                    style.neonBorder,
+                    scale
+                )
             }
         }
     }
 
-    private fun gradient(colors: IntArray, radius: Float) =
-        GradientDrawable(GradientDrawable.Orientation.TL_BR, colors).apply { cornerRadius = radius }
+    private fun gradient(colors: IntArray, radius: Float, neonBorder: Boolean = false, scale: Float = 1f) =
+        GradientDrawable(GradientDrawable.Orientation.TL_BR, colors).apply {
+            cornerRadius = radius
+            if (neonBorder && prefs.getBoolean("neon_enabled", true)) {
+                val strength = prefs.getString("neon_strength", "Trung bình")
+                val (alpha, width) = when (strength) {
+                    "Thấp" -> 75 to 1f
+                    "Cao" -> 220 to 3f
+                    else -> 145 to 2f
+                }
+                setStroke((width * scale).toInt().coerceAtLeast(1), Color.argb(alpha, 64, 145, 255))
+            }
+        }
 
     private fun rounded(color: Int, radius: Float) =
         GradientDrawable().apply { setColor(color); cornerRadius = radius }
