@@ -52,13 +52,10 @@ object ShizukuInputCapabilityProbe {
         }
 
         return try {
-            val identity = execute(arrayOf("id"))
-            val inputCheck = execute(arrayOf("sh", "-c", "command -v input"))
-            val available = inputCheck.exitCode == 0 && inputCheck.output.isNotBlank()
-            val help = if (available) {
-                execute(arrayOf("input", "--help")).output
-                    .lineSequence().take(12).joinToString("\n")
-            } else null
+            val identity = DisplayScaleController.execute("id")
+            val inputCheck = DisplayScaleController.execute("command -v input")
+            val available = inputCheck.success
+            val help = if (available) "Lệnh input tồn tại; chưa xác minh khả năng inject." else null
 
             Result(
                 connected = true,
@@ -73,39 +70,4 @@ object ShizukuInputCapabilityProbe {
         }
     }
 
-    private data class CommandResult(val exitCode: Int, val output: String, val error: String?)
-
-    private fun execute(command: Array<String>): CommandResult {
-        val process = Shizuku.newProcess(command, null, null)
-        val stdout = StringBuilder()
-        val stderr = StringBuilder()
-        val outThread = Thread {
-            runCatching {
-                BufferedReader(InputStreamReader(process.inputStream)).useLines { lines ->
-                    lines.forEach { stdout.appendLine(it) }
-                }
-            }
-        }.apply { name = "apx-shizuku-stdout"; start() }
-        val errThread = Thread {
-            runCatching {
-                BufferedReader(InputStreamReader(process.errorStream)).useLines { lines ->
-                    lines.forEach { stderr.appendLine(it) }
-                }
-            }
-        }.apply { name = "apx-shizuku-stderr"; start() }
-
-        if (!process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-            process.destroy()
-            throw IllegalStateException("Command timed out: ${command.firstOrNull()}")
-        }
-        outThread.join(500)
-        errThread.join(500)
-        return CommandResult(
-            exitCode = process.exitValue(),
-            output = stdout.toString(),
-            error = stderr.toString().trim().ifBlank { null }
-        )
-    }
-
-    private const val COMMAND_TIMEOUT_SECONDS = 3L
 }
