@@ -30,7 +30,8 @@ class InputEngine(
     data class Config(
         val screenWidth: Int = 0,
         val screenHeight: Int = 0,
-        val aimSensitivity: Float = 1.0f,
+        val aimSensitivityX: Float = 1.0f,
+        val aimSensitivityY: Float = 1.0f,
         val maxAimStepPx: Float = 120f,
         val invertMouseY: Boolean = false,
         val smoothMouse: Boolean = false,
@@ -278,8 +279,8 @@ class InputEngine(
     }
 
     private fun dispatchRelativeMotion(rawDx: Float, rawDy: Float) {
-        var dx = rawDx * currentConfig.aimSensitivity
-        var dy = rawDy * currentConfig.aimSensitivity *
+        var dx = rawDx * currentConfig.aimSensitivityX.coerceIn(0.1f, 3f)
+        var dy = rawDy * currentConfig.aimSensitivityY.coerceIn(0.1f, 3f) *
             if (currentConfig.invertMouseY) -1f else 1f
         dx = dx.coerceIn(-currentConfig.maxAimStepPx, currentConfig.maxAimStepPx)
         dy = dy.coerceIn(-currentConfig.maxAimStepPx, currentConfig.maxAimStepPx)
