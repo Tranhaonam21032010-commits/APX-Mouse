@@ -14,6 +14,8 @@ internal object InputDeviceClassifier {
 
     private val deviceHeader = Regex("""add device\s+\d+:\s+(/dev/input/event\d+)""")
     private val capabilityLine = Regex("""^\s*(KEY|REL)\s*\(000[12]\):\s*(.*)$""")
+    private val anyCapabilityLine = Regex("""^\s*[A-Z_]+\s*\(000[0-9a-fA-F]{4}\):.*$""")
+    private val capabilityContinuation = Regex("""^\s{6,}(?:[0-9a-fA-F]{2,8}\b|\().*$""")
     private val hexToken = Regex("""(?i)\b[0-9a-f]{4,8}\b""")
     private val letterKeyCodes = listOf(16..25, 30..38, 44..50).flatMap { it.toList() }.toSet()
 
