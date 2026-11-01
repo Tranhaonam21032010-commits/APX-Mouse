@@ -5,13 +5,12 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import kotlin.math.hypot
+import kotlin.math.min
 
 /**
- * APX MOUSE input translation engine.
- *
- * Receives Android key/mouse events delivered to the focused APX view and
- * converts them into platform-neutral commands. It does NOT inject input into
- * another app. A separately tested Shizuku-capable backend is required for that.
+ * Converts Android window events and selected evdev keyboard/mouse events
+ * into ordered touch commands. It does not read devices itself; the owner must
+ * explicitly start/stop the Shizuku input-capture session.
  */
 class InputEngine(
     private val sink: CommandSink,
@@ -43,17 +42,20 @@ class InputEngine(
             KeyEvent.KEYCODE_W, KeyEvent.KEYCODE_A,
             KeyEvent.KEYCODE_S, KeyEvent.KEYCODE_D
         ),
-        val mouseButtons: Map<Int, MouseButtonBinding> = defaultMouseBindings()
+        /** Per-game points saved by MappingEditor, including KEYCODE_BUTTON_1..5. */
+        val keyBindings: Map<Int, MouseButtonBinding> = emptyMap(),
+        /** Fallback positions for direct Android MotionEvent mouse input. */
+        val mouseButtons: Map<Int, MouseButtonBinding> = emptyMap()
     )
 
     sealed class TouchCommand {
         data class Down(val pointer: Int, val x: Float, val y: Float) : TouchCommand()
         data class Move(val pointer: Int, val x: Float, val y: Float) : TouchCommand()
         data class Up(val pointer: Int) : TouchCommand()
+        /** Retained for API compatibility; joystick movement is now emitted as touch frames. */
         data class Joystick(val x: Float, val y: Float) : TouchCommand()
         data class AimDelta(val dx: Float, val dy: Float) : TouchCommand()
         data class Wheel(val horizontal: Float, val vertical: Float) : TouchCommand()
-        /** Every Android key code is forwarded, not just a small hard-coded list. */
         data class KeyState(
             val keyCode: Int,
             val pressed: Boolean,
@@ -66,7 +68,8 @@ class InputEngine(
 
     private val pressedKeys = linkedSetOf<Int>()
     private val activeMouseButtons = linkedSetOf<Int>()
-    private val activePointerPositions = mutableMapOf<Int, Pair<Float, Float>>()
+    private val activeMousePointers = mutableMapOf<Int, MouseButtonBinding>()
+    private val activeKeyPointers = mutableMapOf<Int, Int>()
     private var currentConfig = config
     private var enabled = true
     private var lastMouseX = Float.NaN
@@ -75,6 +78,7 @@ class InputEngine(
     private var smoothedDy = 0f
     private var joystickX = 0f
     private var joystickY = 0f
+    private var joystickActive = false
 
     @Synchronized
     fun updateConfig(newConfig: Config) {
@@ -89,45 +93,88 @@ class InputEngine(
         if (!value) releaseAll()
     }
 
-    /** Receives all key codes, including function, navigation and modifier keys. */
     @Synchronized
     fun onKeyEvent(event: KeyEvent): Boolean {
         if (!enabled) return false
-        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) {
-            return false
+        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return false
+        processKey(event.keyCode, event.action == KeyEvent.ACTION_DOWN)
+        return event.keyCode in currentConfig.keyBindings || event.keyCode in currentConfig.movementKeys
+    }
+
+    /** Linux evdev KEY_* event from the explicitly selected input devices. */
+    @Synchronized
+    fun onRawKey(codeName: String, pressed: Boolean): Boolean {
+        if (!enabled) return false
+        val keyCode = androidKeyCode(codeName) ?: return false
+        processKey(keyCode, pressed)
+        return keyCode in currentConfig.keyBindings || keyCode in currentConfig.movementKeys
+    }
+
+    /** Linux evdev BTN_* event. Only the mouse buttons supported by MappingEditor are used. */
+    @Synchronized
+    fun onRawMouseButton(codeName: String, pressed: Boolean): Boolean {
+        if (!enabled) return false
+        val keyCode = when (codeName) {
+            "BTN_LEFT" -> KeyEvent.KEYCODE_BUTTON_1
+            "BTN_RIGHT" -> KeyEvent.KEYCODE_BUTTON_2
+            "BTN_MIDDLE" -> KeyEvent.KEYCODE_BUTTON_3
+            "BTN_SIDE" -> KeyEvent.KEYCODE_BUTTON_4
+            "BTN_EXTRA" -> KeyEvent.KEYCODE_BUTTON_5
+            else -> return false
         }
-
-        val down = event.action == KeyEvent.ACTION_DOWN
-        if (down) pressedKeys.add(event.keyCode) else pressedKeys.remove(event.keyCode)
-
-        sink.onCommand(
-            TouchCommand.KeyState(
-                keyCode = event.keyCode,
-                pressed = down,
-                scanCode = event.scanCode,
-                metaState = event.metaState,
-                repeatCount = event.repeatCount,
-                unicodeChar = event.unicodeChar
-            )
-        )
-
-        if (event.keyCode in currentConfig.movementKeys) {
-            updateJoystick()
-            return true
+        val buttonMask = when (codeName) {
+            "BTN_LEFT" -> MotionEvent.BUTTON_PRIMARY
+            "BTN_RIGHT" -> MotionEvent.BUTTON_SECONDARY
+            "BTN_MIDDLE" -> MotionEvent.BUTTON_TERTIARY
+            "BTN_SIDE" -> MotionEvent.BUTTON_BACK
+            "BTN_EXTRA" -> MotionEvent.BUTTON_FORWARD
+            else -> return false
         }
-        // Forward unknown keys too; caller may choose whether to consume them.
+        val binding = currentConfig.keyBindings[keyCode]?.takeIf { it.enabled }
+            ?: currentConfig.mouseButtons[buttonMask]?.takeIf { it.enabled }
+            ?: return false
+        if (pressed) {
+            if (activeMouseButtons.add(buttonMask)) {
+                val point = normalizedPoint(binding.x, binding.y)
+                val active = binding.copy(x = point.first, y = point.second)
+                activeMousePointers[buttonMask] = active
+                sink.onCommand(TouchCommand.Down(binding.pointerId, point.first, point.second))
+            }
+        } else if (activeMouseButtons.remove(buttonMask)) {
+            val active = activeMousePointers.remove(buttonMask)
+            if (active != null) sink.onCommand(TouchCommand.Up(active.pointerId))
+        }
         return true
     }
 
-    /** Mouse movement, hover, relative motion and wheel. */
+    /** Relative mouse movement from EV_REL, grouped by SYN_REPORT by the parser. */
+    @Synchronized
+    fun onRawMouseMotion(dx: Int, dy: Int): Boolean {
+        if (!enabled) return false
+        dispatchRelativeMotion(dx.toFloat(), dy.toFloat())
+        return true
+    }
+
+    @Synchronized
+    fun onRawWheel(horizontal: Int, vertical: Int): Boolean {
+        if (!enabled || (horizontal == 0 && vertical == 0)) return false
+        sink.onCommand(
+            TouchCommand.Wheel(
+                horizontal * currentConfig.wheelSensitivity,
+                vertical * currentConfig.wheelSensitivity
+            )
+        )
+        return true
+    }
+
+    /** Mouse movement, hover, relative motion and wheel received by a focused APX window. */
     @Synchronized
     fun onMouseMotion(event: MotionEvent): Boolean {
         if (!enabled || !event.isFromSource(InputDevice.SOURCE_MOUSE)) return false
-
         when (event.actionMasked) {
             MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_MOVE -> {
-                var dx: Float
-                var dy: Float
+                val dx: Float
+                val dy: Float
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     val relativeX = event.getAxisValue(MotionEvent.AXIS_RELATIVE_X)
                     val relativeY = event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
@@ -144,61 +191,32 @@ class InputEngine(
                 }
                 lastMouseX = event.x
                 lastMouseY = event.y
-
-                dx *= currentConfig.aimSensitivity
-                dy *= currentConfig.aimSensitivity * if (currentConfig.invertMouseY) -1f else 1f
-                dx = dx.coerceIn(-currentConfig.maxAimStepPx, currentConfig.maxAimStepPx)
-                dy = dy.coerceIn(-currentConfig.maxAimStepPx, currentConfig.maxAimStepPx)
-
-                if (currentConfig.smoothMouse) {
-                    smoothedDx = smoothedDx * 0.35f + dx * 0.65f
-                    smoothedDy = smoothedDy * 0.35f + dy * 0.65f
-                    dx = smoothedDx
-                    dy = smoothedDy
-                }
-                if (dx != 0f || dy != 0f) {
-                    sink.onCommand(TouchCommand.AimDelta(dx, dy))
-                    moveActivePointers(dx, dy)
-                }
+                dispatchRelativeMotion(dx, dy)
             }
             MotionEvent.ACTION_SCROLL -> {
-                val horizontal = event.getAxisValue(MotionEvent.AXIS_HSCROLL) *
-                    currentConfig.wheelSensitivity
-                val vertical = event.getAxisValue(MotionEvent.AXIS_VSCROLL) *
-                    currentConfig.wheelSensitivity
-                if (horizontal != 0f || vertical != 0f) {
-                    sink.onCommand(TouchCommand.Wheel(horizontal, vertical))
-                }
+                val horizontal = event.getAxisValue(MotionEvent.AXIS_HSCROLL)
+                val vertical = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+                onRawWheel(horizontal.toInt(), vertical.toInt())
             }
         }
         return true
     }
 
-    /** Handles every mouse button code delivered by Android, including side buttons. */
     @Synchronized
     fun onMouseButtons(event: MotionEvent): Boolean {
-        if (!enabled) return false
-        if (event.actionMasked != MotionEvent.ACTION_BUTTON_PRESS &&
-            event.actionMasked != MotionEvent.ACTION_BUTTON_RELEASE) return false
-
+        if (!enabled || event.actionMasked !in setOf(
+                MotionEvent.ACTION_BUTTON_PRESS, MotionEvent.ACTION_BUTTON_RELEASE
+            )
+        ) return false
         val buttonCode = event.actionButton
-        val binding = currentConfig.mouseButtons[buttonCode] ?: return false
-        if (!binding.enabled) return false
-
-        if (event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS) {
-            if (activeMouseButtons.add(buttonCode)) {
-                val point = normalizedPoint(binding.x, binding.y)
-                activePointerPositions[binding.pointerId] = point
-                sink.onCommand(TouchCommand.Down(binding.pointerId, point.first, point.second))
-            }
-        } else if (activeMouseButtons.remove(buttonCode)) {
-            activePointerPositions.remove(binding.pointerId)
-            sink.onCommand(TouchCommand.Up(binding.pointerId))
-        }
+        val keyCode = androidButtonKeyCode(buttonCode) ?: return false
+        val binding = currentConfig.keyBindings[keyCode]?.takeIf { it.enabled }
+            ?: currentConfig.mouseButtons[buttonCode]?.takeIf { it.enabled }
+            ?: return false
+        applyMouseButton(buttonCode, binding, event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS)
         return true
     }
 
-    /** Useful for devices/Android versions that expose button state but not button actions. */
     @Synchronized
     fun syncMouseButtonState(event: MotionEvent): Boolean {
         if (!enabled || !event.isFromSource(InputDevice.SOURCE_MOUSE)) return false
@@ -207,16 +225,8 @@ class InputEngine(
             if (!binding.enabled) return@forEach
             val isDown = event.buttonState and buttonCode != 0
             val wasDown = buttonCode in activeMouseButtons
-            if (isDown && !wasDown) {
-                activeMouseButtons.add(buttonCode)
-                val point = normalizedPoint(binding.x, binding.y)
-                activePointerPositions[binding.pointerId] = point
-                sink.onCommand(TouchCommand.Down(binding.pointerId, point.first, point.second))
-                handled = true
-            } else if (!isDown && wasDown) {
-                activeMouseButtons.remove(buttonCode)
-                activePointerPositions.remove(binding.pointerId)
-                sink.onCommand(TouchCommand.Up(binding.pointerId))
+            if (isDown != wasDown) {
+                applyMouseButton(buttonCode, binding, isDown)
                 handled = true
             }
         }
@@ -232,6 +242,56 @@ class InputEngine(
     @Synchronized
     fun activeMouseButtonCodes(): Set<Int> = activeMouseButtons.toSet()
 
+    private fun processKey(keyCode: Int, down: Boolean) {
+        if (down) {
+            // Android reports ACTION_DOWN repeatedly while a key is held. Do not send duplicate DOWN frames.
+            if (!pressedKeys.add(keyCode)) return
+            val binding = currentConfig.keyBindings[keyCode]?.takeIf { it.enabled }
+            if (binding != null) {
+                val point = normalizedPoint(binding.x, binding.y)
+                activeKeyPointers[keyCode] = binding.pointerId
+                sink.onCommand(TouchCommand.Down(binding.pointerId, point.first, point.second))
+            } else if (keyCode in currentConfig.movementKeys) {
+                updateJoystick()
+            }
+        } else {
+            if (!pressedKeys.remove(keyCode)) return
+            activeKeyPointers.remove(keyCode)?.let { sink.onCommand(TouchCommand.Up(it)) }
+            if (keyCode in currentConfig.movementKeys) updateJoystick()
+        }
+    }
+
+    private fun applyMouseButton(buttonCode: Int, binding: MouseButtonBinding, down: Boolean) {
+        if (down) {
+            if (activeMouseButtons.add(buttonCode)) {
+                val point = normalizedPoint(binding.x, binding.y)
+                activeMousePointers[buttonCode] = binding.copy(x = point.first, y = point.second)
+                sink.onCommand(TouchCommand.Down(binding.pointerId, point.first, point.second))
+            }
+        } else if (activeMouseButtons.remove(buttonCode)) {
+            activeMousePointers.remove(buttonCode)?.let { sink.onCommand(TouchCommand.Up(it.pointerId)) }
+        }
+    }
+
+    private fun dispatchRelativeMotion(rawDx: Float, rawDy: Float) {
+        var dx = rawDx * currentConfig.aimSensitivity
+        var dy = rawDy * currentConfig.aimSensitivity *
+            if (currentConfig.invertMouseY) -1f else 1f
+        dx = dx.coerceIn(-currentConfig.maxAimStepPx, currentConfig.maxAimStepPx)
+        dy = dy.coerceIn(-currentConfig.maxAimStepPx, currentConfig.maxAimStepPx)
+
+        if (currentConfig.smoothMouse) {
+            smoothedDx = smoothedDx * 0.35f + dx * 0.65f
+            smoothedDy = smoothedDy * 0.35f + dy * 0.65f
+            dx = smoothedDx
+            dy = smoothedDy
+        }
+        if (dx == 0f && dy == 0f) return
+        sink.onCommand(TouchCommand.AimDelta(dx, dy))
+        moveActiveMousePointers(dx, dy)
+    }
+
+    /** W/A/S/D become a real held joystick pointer rather than an unhandled placeholder command. */
     private fun updateJoystick() {
         var x = 0f
         var y = 0f
@@ -245,25 +305,42 @@ class InputEngine(
             x /= length
             y /= length
         }
-        if (x != joystickX || y != joystickY) {
-            joystickX = x
-            joystickY = y
-            sink.onCommand(TouchCommand.Joystick(x, y))
+        if (x == 0f && y == 0f) {
+            if (joystickActive) sink.onCommand(TouchCommand.Up(JOYSTICK_POINTER_ID))
+            joystickActive = false
+            joystickX = 0f
+            joystickY = 0f
+            return
         }
-    }
+        if (x == joystickX && y == joystickY && joystickActive) return
 
-    /** Moves every currently held mapped pointer, allowing mouse-held drag gestures. */
-    private fun moveActivePointers(dx: Float, dy: Float) {
         val maxX = (currentConfig.screenWidth - 1).coerceAtLeast(0).toFloat()
         val maxY = (currentConfig.screenHeight - 1).coerceAtLeast(0).toFloat()
-        activeMouseButtons.toList().forEach { buttonCode ->
-            val binding = currentConfig.mouseButtons[buttonCode] ?: return@forEach
-            val current = activePointerPositions[binding.pointerId] ?: return@forEach
-            val next = (current.first + dx).coerceIn(0f, maxX) to
-                (current.second + dy).coerceIn(0f, maxY)
-            if (next != current) {
-                activePointerPositions[binding.pointerId] = next
-                sink.onCommand(TouchCommand.Move(binding.pointerId, next.first, next.second))
+        val minDimension = min(maxX, maxY)
+        val centerX = currentConfig.joystickCenterX.coerceIn(0f, 1f) * maxX
+        val centerY = currentConfig.joystickCenterY.coerceIn(0f, 1f) * maxY
+        val radius = currentConfig.joystickRadius.coerceIn(0.01f, 0.45f) * minDimension
+
+        if (!joystickActive) {
+            sink.onCommand(TouchCommand.Down(JOYSTICK_POINTER_ID, centerX, centerY))
+            joystickActive = true
+        }
+        val targetX = (centerX + x * radius).coerceIn(0f, maxX)
+        val targetY = (centerY + y * radius).coerceIn(0f, maxY)
+        sink.onCommand(TouchCommand.Move(JOYSTICK_POINTER_ID, targetX, targetY))
+        joystickX = x
+        joystickY = y
+    }
+
+    private fun moveActiveMousePointers(dx: Float, dy: Float) {
+        val maxX = (currentConfig.screenWidth - 1).coerceAtLeast(0).toFloat()
+        val maxY = (currentConfig.screenHeight - 1).coerceAtLeast(0).toFloat()
+        activeMousePointers.toMap().forEach { (buttonCode, binding) ->
+            val nextX = (binding.x + dx).coerceIn(0f, maxX)
+            val nextY = (binding.y + dy).coerceIn(0f, maxY)
+            if (nextX != binding.x || nextY != binding.y) {
+                activeMousePointers[buttonCode] = binding.copy(x = nextX, y = nextY)
+                sink.onCommand(TouchCommand.Move(binding.pointerId, nextX, nextY))
             }
         }
     }
@@ -275,32 +352,61 @@ class InputEngine(
     }
 
     private fun releaseAll() {
-        activeMouseButtons.toList().forEach { code ->
-            currentConfig.mouseButtons[code]?.let { sink.onCommand(TouchCommand.Up(it.pointerId)) }
-        }
+        activeMousePointers.values.toList().forEach { sink.onCommand(TouchCommand.Up(it.pointerId)) }
+        activeMousePointers.clear()
         activeMouseButtons.clear()
-        activePointerPositions.clear()
-        pressedKeys.toList().forEach { code ->
-            sink.onCommand(TouchCommand.KeyState(code, false, 0, 0, 0, 0))
-        }
+        activeKeyPointers.values.toList().forEach { sink.onCommand(TouchCommand.Up(it)) }
+        activeKeyPointers.clear()
         pressedKeys.clear()
+        if (joystickActive) sink.onCommand(TouchCommand.Up(JOYSTICK_POINTER_ID))
+        joystickActive = false
         joystickX = 0f
         joystickY = 0f
-        sink.onCommand(TouchCommand.Joystick(0f, 0f))
         lastMouseX = Float.NaN
         lastMouseY = Float.NaN
         smoothedDx = 0f
         smoothedDy = 0f
     }
 
+    private fun androidButtonKeyCode(button: Int): Int? = when (button) {
+        MotionEvent.BUTTON_PRIMARY -> KeyEvent.KEYCODE_BUTTON_1
+        MotionEvent.BUTTON_SECONDARY -> KeyEvent.KEYCODE_BUTTON_2
+        MotionEvent.BUTTON_TERTIARY -> KeyEvent.KEYCODE_BUTTON_3
+        MotionEvent.BUTTON_BACK -> KeyEvent.KEYCODE_BUTTON_4
+        MotionEvent.BUTTON_FORWARD -> KeyEvent.KEYCODE_BUTTON_5
+        else -> null
+    }
+
+    private fun androidKeyCode(evdevCode: String): Int? {
+        if (!evdevCode.startsWith("KEY_")) return null
+        val suffix = evdevCode.removePrefix("KEY_")
+        val androidSuffix = when (suffix) {
+            "ESC" -> "ESCAPE"
+            "BACKSPACE" -> "DEL"
+            "DELETE" -> "FORWARD_DEL"
+            "LEFTSHIFT" -> "SHIFT_LEFT"
+            "RIGHTSHIFT" -> "SHIFT_RIGHT"
+            "LEFTCTRL" -> "CTRL_LEFT"
+            "RIGHTCTRL" -> "CTRL_RIGHT"
+            "LEFTALT" -> "ALT_LEFT"
+            "RIGHTALT" -> "ALT_RIGHT"
+            "LEFTMETA" -> "META_LEFT"
+            "RIGHTMETA" -> "META_RIGHT"
+            "CAPSLOCK" -> "CAPS_LOCK"
+            "PAGEUP" -> "PAGE_UP"
+            "PAGEDOWN" -> "PAGE_DOWN"
+            "UP" -> "DPAD_UP"
+            "DOWN" -> "DPAD_DOWN"
+            "LEFT" -> "DPAD_LEFT"
+            "RIGHT" -> "DPAD_RIGHT"
+            "KPENTER" -> "NUMPAD_ENTER"
+            else -> suffix
+        }
+        val code = KeyEvent.keyCodeFromString("KEYCODE_$androidSuffix")
+        return code.takeIf { it != KeyEvent.KEYCODE_UNKNOWN }
+    }
+
     companion object {
-        /** Android MotionEvent button bitmasks; extra buttons are supported when reported by device. */
-        fun defaultMouseBindings(): Map<Int, MouseButtonBinding> = mapOf(
-            MotionEvent.BUTTON_PRIMARY to MouseButtonBinding(1, 0.82f, 0.78f),
-            MotionEvent.BUTTON_SECONDARY to MouseButtonBinding(2, 0.78f, 0.48f),
-            MotionEvent.BUTTON_TERTIARY to MouseButtonBinding(3, 0.50f, 0.50f),
-            MotionEvent.BUTTON_BACK to MouseButtonBinding(4, 0.18f, 0.50f),
-            MotionEvent.BUTTON_FORWARD to MouseButtonBinding(5, 0.28f, 0.50f)
-        )
+        private const val JOYSTICK_POINTER_ID = 0
     }
 }
