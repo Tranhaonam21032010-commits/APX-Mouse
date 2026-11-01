@@ -173,6 +173,12 @@ class DisplayScaleActivity : Activity() {
             status.text = "Kích thước hợp lệ: 320 đến 7680"
             return
         }
+        val snapshot = DisplayScaleController.captureOriginal(this)
+        if (!snapshot.success) {
+            status.text = "Không lưu được cấu hình màn hình gốc: ${snapshot.output}"
+            Toast.makeText(this, status.text, Toast.LENGTH_LONG).show()
+            return
+        }
         val result = DisplayScaleController.apply(width, height)
         status.text = if (result.success) "Đã áp dụng " + width + " × " + height else "Lỗi: " + result.output
         Toast.makeText(this, status.text, Toast.LENGTH_LONG).show()
