@@ -19,7 +19,7 @@ object DisplayScaleController {
     private const val KEY_DENSITY = "display_original_density"
     private const val KEY_SIZE_OVERRIDE = "display_original_size_override"
     private const val KEY_DENSITY_OVERRIDE = "display_original_density_override"
-    private const val SERVICE_VERSION = 3
+    private const val SERVICE_VERSION = 4
 
     data class Result(val success: Boolean, val output: String)
 
@@ -114,6 +114,48 @@ object DisplayScaleController {
             Result(!output.startsWith("ERROR:"), output)
         } catch (e: Exception) {
             Result(false, "Lỗi gửi khung cảm ứng: ${e.message}")
+        }
+    }
+
+    /** Waits off the main thread for the asynchronous Shizuku service bind. */
+    fun awaitReady(timeoutMillis: Long = 4_000L): Result {
+        val deadline = android.os.SystemClock.uptimeMillis() + timeoutMillis.coerceIn(0L, 10_000L)
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            val service = shell
+            if (service?.asBinder()?.isBinderAlive == true) return Result(true, "Shizuku UserService đã sẵn sàng")
+            try {
+                Thread.sleep(40L)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return Result(false, "Đã hủy chờ kết nối Shizuku")
+            }
+        }
+        return Result(false, bindError ?: "Shizuku UserService không phản hồi")
+    }
+
+    fun startInputCapture(eventPaths: Array<String>, listener: IInputEventListener): Result {
+        val service = shell
+        if (service == null || service.asBinder()?.isBinderAlive != true)
+            return Result(false, bindError ?: "Shizuku UserService chưa sẵn sàng")
+        if (eventPaths.isEmpty() || eventPaths.size > 8)
+            return Result(false, "Cần chọn từ 1 đến 8 thiết bị input")
+        return try {
+            val output = service.startInputCapture(eventPaths, listener).trim()
+            Result(!output.startsWith("ERROR:"), output)
+        } catch (e: Exception) {
+            Result(false, "Lỗi bắt đầu đọc input: ${e.message}")
+        }
+    }
+
+    fun stopInputCapture(): Result {
+        val service = shell
+        if (service == null || service.asBinder()?.isBinderAlive != true)
+            return Result(false, bindError ?: "Shizuku UserService chưa sẵn sàng")
+        return try {
+            val output = service.stopInputCapture().trim()
+            Result(!output.startsWith("ERROR:"), output)
+        } catch (e: Exception) {
+            Result(false, "Lỗi dừng đọc input: ${e.message}")
         }
     }
 
