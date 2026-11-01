@@ -496,6 +496,8 @@ class GameOverlayService : Service() {
         return InputEngine.Config(
             screenWidth = width,
             screenHeight = height,
+            aimSensitivityX = settings.getInt("mouse_x_$gamePackage", 100).coerceIn(10, 300) / 100f,
+            aimSensitivityY = settings.getInt("mouse_y_$gamePackage", 100).coerceIn(10, 300) / 100f,
             joystickCenterX = settings.getFloat("joystick_center_x_$gamePackage", 0.18f),
             joystickCenterY = settings.getFloat("joystick_center_y_$gamePackage", 0.78f),
             joystickRadius = settings.getFloat("joystick_radius_$gamePackage", 0.12f),
