@@ -46,7 +46,9 @@ class InputEngine(
         /** Per-game points saved by MappingEditor, including KEYCODE_BUTTON_1..5. */
         val keyBindings: Map<Int, MouseButtonBinding> = emptyMap(),
         /** Fallback positions for direct Android MotionEvent mouse input. */
-        val mouseButtons: Map<Int, MouseButtonBinding> = emptyMap()
+        val mouseButtons: Map<Int, MouseButtonBinding> = emptyMap(),
+        /** Mouse buttons whose mapped touch point follows relative mouse motion (aim/drag). */
+        val dragMouseButtons: Set<Int> = setOf(MotionEvent.BUTTON_SECONDARY)
     )
 
     sealed class TouchCommand {
@@ -341,6 +343,8 @@ class InputEngine(
         val maxX = (currentConfig.screenWidth - 1).coerceAtLeast(0).toFloat()
         val maxY = (currentConfig.screenHeight - 1).coerceAtLeast(0).toFloat()
         activeMousePointers.toMap().forEach { (buttonCode, binding) ->
+            // Keep click/fire buttons anchored; only the configured drag button follows the mouse.
+            if (buttonCode !in currentConfig.dragMouseButtons) return@forEach
             val nextX = (binding.x + dx).coerceIn(0f, maxX)
             val nextY = (binding.y + dy).coerceIn(0f, maxY)
             if (nextX != binding.x || nextY != binding.y) {
