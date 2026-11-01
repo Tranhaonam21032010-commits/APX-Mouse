@@ -95,19 +95,23 @@ class InputEngine(
 
     @Synchronized
     fun onKeyEvent(event: KeyEvent): Boolean {
-        if (!enabled) return false
         if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return false
-        processKey(event.keyCode, event.action == KeyEvent.ACTION_DOWN)
-        return event.keyCode in currentConfig.keyBindings || event.keyCode in currentConfig.movementKeys
+        return onMappedKeyCode(event.keyCode, event.action == KeyEvent.ACTION_DOWN)
+    }
+
+    /** Common keyboard entry point, also used by deterministic unit tests. */
+    @Synchronized
+    fun onMappedKeyCode(keyCode: Int, pressed: Boolean): Boolean {
+        if (!enabled) return false
+        processKey(keyCode, pressed)
+        return keyCode in currentConfig.keyBindings || keyCode in currentConfig.movementKeys
     }
 
     /** Linux evdev KEY_* event from the explicitly selected input devices. */
     @Synchronized
     fun onRawKey(codeName: String, pressed: Boolean): Boolean {
-        if (!enabled) return false
         val keyCode = androidKeyCode(codeName) ?: return false
-        processKey(keyCode, pressed)
-        return keyCode in currentConfig.keyBindings || keyCode in currentConfig.movementKeys
+        return onMappedKeyCode(keyCode, pressed)
     }
 
     /** Linux evdev BTN_* event. Only the mouse buttons supported by MappingEditor are used. */
