@@ -109,14 +109,34 @@ class GameOverlayService : Service() {
         }
 
         override fun onInputCaptureEnded(message: String) {
+            // A planned stop clears inputSessionActive before destroying getevent.
+            // An unexpected process exit must also release every held touch and worker.
+            val unexpected = inputSessionActive
+            inputSessionActive = false
             handler.post {
                 inputCaptureRunning = false
-                if (inputSessionAllowed && serviceActive.get()) {
+                if (unexpected && inputSessionAllowed && serviceActive.get()) {
                     android.widget.Toast.makeText(
                         this@GameOverlayService,
                         "Input Engine đã dừng: ${message.take(120)}",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
+                }
+            }
+            if (unexpected) {
+                runCatching {
+                    inputControlExecutor.execute {
+                        val engine = inputEngine
+                        inputEngine = null
+                        engine?.reset()
+                        val backend = inputBackend
+                        inputBackend = null
+                        backend?.close()
+                        inputCaptureRunning = false
+                        runCatching {
+                            inputDispatchExecutor.execute { evdevParser.reset() }
+                        }
+                    }
                 }
             }
         }
