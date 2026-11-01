@@ -366,7 +366,10 @@ class GameOverlayService : Service() {
     private fun startInputCaptureIfEnabled() {
         if (!inputSessionAllowed || inputCaptureRunning || inputCaptureStarting.get()) return
         val settings = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
-        if (!settings.getBoolean(KEY_INPUT_ENABLED, false)) return
+        if (!settings.getBoolean(KEY_INPUT_ENABLED, false)) {
+            stopInputCapture()
+            return
+        }
         val paths = settings.getStringSet(KEY_INPUT_PATHS, emptySet())?.toSet().orEmpty()
             .filter { Regex("/dev/input/event[0-9]{1,3}").matches(it) }
             .take(8)
@@ -392,9 +395,10 @@ class GameOverlayService : Service() {
                         postInputStatus(ready.output)
                         return@execute
                     }
+                    if (!inputSessionAllowed || !serviceActive.get()) return@execute
 
                     val engineConfig = createGameInputConfig()
-                    backend = ShizukuInputBackend(object : ShizukuInputBackend.Listener {
+                    val createdBackend = ShizukuInputBackend(object : ShizukuInputBackend.Listener {
                         override fun onStatus(message: String) {
                             android.util.Log.w("APX-MOUSE-INPUT", message)
                         }
@@ -402,8 +406,9 @@ class GameOverlayService : Service() {
                             if (!success) android.util.Log.w("APX-MOUSE-INPUT", message)
                         }
                     })
-                    val engine = InputEngine(backend, engineConfig)
-                    inputBackend = backend
+                    backend = createdBackend
+                    val engine = InputEngine(createdBackend, engineConfig)
+                    inputBackend = createdBackend
                     inputEngine = engine
                     evdevParser.reset()
                     inputSessionActive = true
@@ -416,7 +421,7 @@ class GameOverlayService : Service() {
                         inputEngine = null
                         inputBackend = null
                         engine.reset()
-                        backend.close()
+                        createdBackend.close()
                         postInputStatus(result.output)
                         return@execute
                     }
