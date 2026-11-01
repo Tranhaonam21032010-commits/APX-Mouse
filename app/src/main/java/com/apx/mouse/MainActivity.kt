@@ -76,7 +76,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        selectedGame = prefs.getString(KEY_SELECTED_GAME, "Đấu Trường") ?: "Đấu Trường"
+        selectedGame = prefs.getString(KEY_SELECTED_GAME, "") ?: ""
         window.statusBarColor = canvasBackground
         window.navigationBarColor = canvasBackground
         canvas = FrameLayout(this).apply { setBackgroundColor(canvasBackground) }
@@ -133,7 +133,8 @@ class MainActivity : Activity() {
     private enum class UiPage { HUB, GAME_SELECTION, ADD_APPS, SETTINGS, APP_DETAILS }
     private var currentPage = UiPage.HUB
     private var selectedPackage: String? = null
-    private var selectedGame = "Đấu Trường"
+    private var selectedGame = ""
+    private var gameSelectionPage = 0
 
     private fun navigateTo(page: UiPage) {
         currentPage = page
@@ -200,28 +201,103 @@ class MainActivity : Activity() {
     }
 
     private fun buildGameSelectionPage() {
-        buildPageHeader("CHỌN KHU VỰC GAME", "Chọn hồ sơ game để mở giao diện điều khiển tương ứng")
-        val games = listOf("Đua Sao", "Sinh Tồn Đêm", "Đấu Trường")
-        games.forEachIndexed { index, game ->
-            val x = 180f + index * 540f
-            val active = selectedGame == game
+        buildPageHeader("CHỌN GAME TRÊN ĐIỆN THOẠI",
+            "Danh sách lấy trực tiếp từ ứng dụng đã cài đặt · Chạm để chọn game")
+        val apps = getLaunchableApps(includeSystemApps = true)
+        if (apps.isEmpty()) {
+            addText("KHÔNG TÌM THẤY ỨNG DỤNG CÓ THỂ MỞ",
+                300f, 390f, 1320f, 60f, 25f, muted, true, Gravity.CENTER)
+            addText("Cài game có biểu tượng mở ứng dụng, sau đó quay lại đây.",
+                300f, 455f, 1320f, 40f, 17f, muted, false, Gravity.CENTER)
+            pageButton("QUAY LẠI GAME SPACE", 710f, 820f, 500f, 72f) {
+                navigateTo(UiPage.HUB)
+            }
+            return
+        }
+
+        if (selectedGame.isNotBlank() && apps.none { it.activityInfo.packageName == selectedGame }) {
+            selectedGame = ""
+            prefs.edit().remove(KEY_SELECTED_GAME).apply()
+        }
+
+        val pageSize = 12
+        val pageCount = ((apps.size + pageSize - 1) / pageSize).coerceAtLeast(1)
+        gameSelectionPage = gameSelectionPage.coerceIn(0, pageCount - 1)
+        apps.drop(gameSelectionPage * pageSize).take(pageSize).forEachIndexed { index, app ->
+            val packageName = app.activityInfo.packageName
+            val label = app.loadLabel(packageManager).toString()
+            val active = selectedGame == packageName
+            val col = index % 4
+            val row = index / 4
+            val x = 70f + col * 455f
+            val y = 220f + row * 205f
             val colors = if (active) intArrayOf(Color.rgb(23, 105, 155), Color.rgb(10, 43, 75))
                 else intArrayOf(Color.rgb(22, 48, 82), Color.rgb(8, 21, 42))
-            val card = addPanel(x, 340f, 460f, 300f, colors, 26f)
-            val selectGame = {
-                selectedGame = game
-                prefs.edit().putString(KEY_SELECTED_GAME, game).apply()
+            val card = addPanel(x, y, 420f, 175f, colors, 20f,
+                neonBorder = active || prefs.getBoolean("neon_enabled", true))
+            card.contentDescription = "$label, ${if (active) "đang được chọn" else "chạm để chọn"}"
+            addClick(card) {
+                selectedGame = packageName
+                selectedPackages.add(packageName)
+                prefs.edit()
+                    .putString(KEY_SELECTED_GAME, packageName)
+                    .putStringSet(KEY_SELECTED_APPS, selectedPackages.toSet())
+                    .apply()
                 navigateTo(UiPage.GAME_SELECTION)
             }
-            addClick(card, selectGame)
-            val title = addText(game, x + 28f, 410f, 404f, 64f, 32f, white, true, Gravity.CENTER)
-            addClick(title, selectGame)
-            val state = if (active) "ĐANG CHỌN" else "CHỌN HỒ SƠ"
-            addText(state, x + 28f, 500f, 404f, 38f, 17f,
-                if (active) green else muted, true, Gravity.CENTER)
-            if (active) addText("✓", x + 190f, 555f, 80f, 60f, 42f, green, true, Gravity.CENTER)
+            val icon = ImageView(this).apply {
+                setImageDrawable(app.loadIcon(packageManager))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = label
+            }
+            addAt(icon, x + 22f, y + 38f, 92f, 92f)
+            val title = addText(label, x + 132f, y + 30f, 270f, 52f,
+                21f, white, true)
+            val packageLabel = addText(packageName, x + 132f, y + 83f, 270f, 32f,
+                12f, muted, false)
+            val state = addText(
+                if (active) "✓ GAME ĐANG CHỌN" else "CHỌN GAME NÀY",
+                x + 132f, y + 125f, 270f, 32f, 14f,
+                if (active) green else blue, true
+            )
+            listOf(title, packageLabel, state, icon).forEach { view ->
+                view.isClickable = true
+                view.setOnClickListener { card.performClick() }
+                view.contentDescription = label
+            }
         }
-        pageButton("MỞ GAME SPACE", 760f, 820f, 400f, 76f) { navigateTo(UiPage.HUB) }
+
+        addText(
+            "ĐÃ TÌM THẤY ${apps.size} ỨNG DỤNG · ${if (selectedGame.isBlank()) "CHƯA CHỌN GAME" else "ĐÃ CHỌN: ${selectedGameLabel()}"}",
+            360f, 855f, 1200f, 38f, 16f, muted, true, Gravity.CENTER
+        )
+        if (pageCount > 1) {
+            if (gameSelectionPage > 0) pageButton("‹ TRƯỚC", 330f, 910f, 210f, 54f) {
+                gameSelectionPage--
+                navigateTo(UiPage.GAME_SELECTION)
+            }
+            addText("TRANG ${gameSelectionPage + 1} / $pageCount",
+                760f, 915f, 400f, 42f, 16f, muted, true, Gravity.CENTER)
+            if (gameSelectionPage < pageCount - 1) pageButton("SAU ›", 1380f, 910f, 210f, 54f) {
+                gameSelectionPage++
+                navigateTo(UiPage.GAME_SELECTION)
+            }
+        }
+        pageButton("MỞ GAME SPACE", 760f, 985f, 400f, 64f) {
+            if (selectedGame.isBlank()) {
+                toast("Hãy chọn một game trong danh sách trước")
+            } else {
+                navigateTo(UiPage.HUB)
+            }
+        }
+    }
+
+    private fun selectedGameLabel(): String {
+        if (selectedGame.isBlank()) return "Chưa chọn game"
+        return runCatching {
+            val info = packageManager.getApplicationInfo(selectedGame, 0)
+            packageManager.getApplicationLabel(info).toString()
+        }.getOrDefault("Game không còn cài đặt")
     }
 
     private fun buildAddAppsPage() {
@@ -372,7 +448,7 @@ class MainActivity : Activity() {
     }
 
     private fun buildAppDetailsPage() {
-        buildPageHeader("CHI TIẾT ỨNG DỤNG", selectedGame)
+        buildPageHeader("CHI TIẾT ỨNG DỤNG", selectedGameLabel())
         val packageName = selectedPackage
         if (packageName == null || packageManager.getLaunchIntentForPackage(packageName) == null) {
             addText("Chưa chọn ứng dụng", 500f, 420f, 920f, 70f, 28f, muted, true, Gravity.CENTER)
@@ -425,12 +501,12 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun getLaunchableApps(): List<ResolveInfo> {
+    private fun getLaunchableApps(includeSystemApps: Boolean = prefs.getBoolean(KEY_SHOW_SYSTEM_APPS, false)): List<ResolveInfo> {
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         return packageManager.queryIntentActivities(launcherIntent, 0)
             .filter { it.activityInfo.packageName != packageName }
             .filter {
-                prefs.getBoolean(KEY_SHOW_SYSTEM_APPS, false) ||
+                includeSystemApps ||
                     (it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0
             }
             .distinctBy { it.activityInfo.packageName }
