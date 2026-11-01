@@ -6,7 +6,7 @@ package com.apx.mouse
  */
 internal class TouchFrameState(private val maxPointers: Int = 10) {
     data class Pointer(val id: Int, val x: Float, val y: Float)
-    data class Frame(val action: Int, val pointers: List<Pointer>)
+    data class Frame(val action: Int, val pointers: List<Pointer>, val releasedPointerId: Int? = null)
 
     private val active = LinkedHashMap<Int, Pointer>()
 
@@ -32,9 +32,11 @@ internal class TouchFrameState(private val maxPointers: Int = 10) {
         val index = pointers.indexOfFirst { it.id == id }
         val action = if (pointers.size == 1) ACTION_UP else ACTION_POINTER_UP or
             (index shl ACTION_POINTER_INDEX_SHIFT)
-        active.remove(id)
-        return Frame(action, pointers)
+        return Frame(action, pointers, releasedPointerId = id)
     }
+
+    /** Commit the release only after Android accepted the corresponding UP frame. */
+    fun finishUp(id: Int): Boolean = active.remove(id) != null
 
     fun cancel(): Frame? {
         if (active.isEmpty()) return null
