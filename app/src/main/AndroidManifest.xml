@@ -42,7 +42,7 @@
 
         <activity android:name=".MouseTweakActivity" android:exported="false" android:screenOrientation="landscape" />
         <activity android:name=".InputDiagnosticsActivity" android:exported="false" android:screenOrientation="landscape" />
-        <activity android:name=".DisplayScaleActivity" android:exported="false" android:screenOrientation="landscape" />
+        <activity android:name=".DisplayScaleActivity" android:exported="false" />
         <activity android:name=".MappingEditor" android:exported="false" android:screenOrientation="landscape" />
         <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="landscape">
             <intent-filter>
