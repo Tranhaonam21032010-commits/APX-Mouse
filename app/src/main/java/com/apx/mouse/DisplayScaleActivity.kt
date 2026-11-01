@@ -148,6 +148,15 @@ class DisplayScaleActivity : Activity() {
             setOnClickListener { finish() }
         }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { setMargins(dp(5), dp(3), dp(5), dp(3)) })
         content.addView(buttons, LinearLayout.LayoutParams(-1, dp(60)))
+        content.addView(Button(this).apply {
+            text = "KHÔI PHỤC ĐỘ PHÂN GIẢI, DPI VÀ XOAY"
+            isAllCaps = false
+            setOnClickListener {
+                val result = DisplayScaleController.restore(this@DisplayScaleActivity)
+                status.text = result.output
+                Toast.makeText(this@DisplayScaleActivity, result.output, Toast.LENGTH_LONG).show()
+            }
+        }, LinearLayout.LayoutParams(-1, dp(48)))
         content.addView(label(
             "Độ phân giải, DPI và chế độ xoay tạm sẽ được khôi phục khi phiên game kết thúc. Cần Shizuku.",
             11f, Color.LTGRAY
