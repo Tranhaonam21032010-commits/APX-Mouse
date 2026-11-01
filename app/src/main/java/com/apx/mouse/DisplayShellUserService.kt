@@ -285,7 +285,7 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
                     process.inputStream.bufferedReader().useLines { lines ->
                         lines.forEach { line ->
                             synchronized(output) {
-                                if (output.length < 16_000) output.append(line).append('\\n')
+                                if (output.length < 16_000) output.append(line).append('\n')
                             }
                         }
                     }
