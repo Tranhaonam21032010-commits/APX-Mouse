@@ -284,6 +284,12 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
               normalized == "wm size reset" || normalized == "wm density reset" ||
               normalized.matches(Regex("wm size [0-9]{3,4}x[0-9]{3,4}")) ||
               normalized.matches(Regex("wm density [0-9]{2,4}")) ||
+              normalized == "settings get system accelerometer_rotation" ||
+              normalized == "settings get system user_rotation" ||
+              normalized.matches(Regex("settings put system accelerometer_rotation [01]")) ||
+              normalized.matches(Regex("settings put system user_rotation [0-3]")) ||
+              normalized == "settings delete system accelerometer_rotation" ||
+              normalized == "settings delete system user_rotation" ||
               normalized.matches(Regex("input tap [0-9]{1,5} [0-9]{1,5}")))) {
             return "ERROR: Lệnh không được phép"
         }
