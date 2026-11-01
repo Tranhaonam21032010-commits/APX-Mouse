@@ -29,13 +29,6 @@ class InputEngine(
 
     data class JoystickDirection(val x: Float, val y: Float)
 
-    private val defaultJoystickDirections = mapOf(
-        KeyEvent.KEYCODE_W to JoystickDirection(0f, -1f),
-        KeyEvent.KEYCODE_A to JoystickDirection(-1f, 0f),
-        KeyEvent.KEYCODE_S to JoystickDirection(0f, 1f),
-        KeyEvent.KEYCODE_D to JoystickDirection(1f, 0f)
-    )
-
     data class Config(
         val screenWidth: Int = 0,
         val screenHeight: Int = 0,
@@ -243,10 +236,20 @@ class InputEngine(
     @Synchronized
     fun syncMouseButtonState(event: MotionEvent): Boolean {
         if (!enabled || !event.isFromSource(InputDevice.SOURCE_MOUSE)) return false
+        return syncMouseButtonState(event.buttonState)
+    }
+
+    /** Testable button-state path shared by Android MotionEvent and mouse drivers. */
+    @Synchronized
+    internal fun syncMouseButtonState(buttonState: Int): Boolean {
+        if (!enabled) return false
         var handled = false
-        currentConfig.mouseButtons.forEach { (buttonCode, binding) ->
-            if (!binding.enabled) return@forEach
-            val isDown = event.buttonState and buttonCode != 0
+        SUPPORTED_MOUSE_BUTTONS.forEach { buttonCode ->
+            val keyCode = androidButtonKeyCode(buttonCode) ?: return@forEach
+            val binding = currentConfig.keyBindings[keyCode]?.takeIf { it.enabled }
+                ?: currentConfig.mouseButtons[buttonCode]?.takeIf { it.enabled }
+                ?: return@forEach
+            val isDown = buttonState and buttonCode != 0
             val wasDown = buttonCode in activeMouseButtons
             if (isDown != wasDown) {
                 applyMouseButton(buttonCode, binding, isDown)
@@ -380,13 +383,15 @@ class InputEngine(
     }
 
     private fun releaseAll() {
-        activeMousePointers.values.toList().forEach { sink.onCommand(TouchCommand.Up(it.pointerId)) }
+        val releasedPointers = linkedSetOf<Int>()
+        activeMousePointers.values.forEach { releasedPointers.add(it.pointerId) }
+        activeKeyPointers.values.forEach { releasedPointers.add(it) }
+        if (joystickActive) releasedPointers.add(JOYSTICK_POINTER_ID)
+        releasedPointers.forEach { sink.onCommand(TouchCommand.Up(it)) }
         activeMousePointers.clear()
         activeMouseButtons.clear()
-        activeKeyPointers.values.toList().forEach { sink.onCommand(TouchCommand.Up(it)) }
         activeKeyPointers.clear()
         pressedKeys.clear()
-        if (joystickActive) sink.onCommand(TouchCommand.Up(JOYSTICK_POINTER_ID))
         joystickActive = false
         joystickX = 0f
         joystickY = 0f
@@ -436,5 +441,12 @@ class InputEngine(
 
     companion object {
         private const val JOYSTICK_POINTER_ID = 0
+        private val SUPPORTED_MOUSE_BUTTONS = listOf(
+            MotionEvent.BUTTON_PRIMARY,
+            MotionEvent.BUTTON_SECONDARY,
+            MotionEvent.BUTTON_TERTIARY,
+            MotionEvent.BUTTON_BACK,
+            MotionEvent.BUTTON_FORWARD
+        )
     }
 }
