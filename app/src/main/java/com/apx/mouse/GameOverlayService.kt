@@ -1293,7 +1293,7 @@ class GameOverlayService : Service() {
         private const val INPUT_RETRY_INTERVAL_MS = 10_000L
         private const val KEY_INPUT_ENABLED = "input_capture_enabled"
         private const val KEY_INPUT_PATHS = "input_event_paths"
-        private const val MAX_MAPPED_POINTS = 10
+        private const val MAX_MAPPED_POINTS = 9
 
         const val EXTRA_GAME_PACKAGE = "extra_game_package"
         private const val CHANNEL_ID = "apx_game_overlay"
