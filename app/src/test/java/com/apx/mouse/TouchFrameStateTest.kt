@@ -2,6 +2,7 @@ package com.apx.mouse
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TouchFrameStateTest {
@@ -13,6 +14,10 @@ class TouchFrameStateTest {
 
         val up = state.up(1)!!
         assertEquals(TouchFrameState.ACTION_UP, up.action)
+        assertEquals(2, state.activeCount())
+        assertTrue(state.finishUp(7))
+        assertEquals(1, state.activeCount())
+        assertTrue(state.finishUp(1))
         assertEquals(0, state.activeCount())
     }
 
