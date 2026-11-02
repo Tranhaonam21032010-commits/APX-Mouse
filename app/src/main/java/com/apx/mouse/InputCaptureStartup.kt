@@ -6,6 +6,7 @@ internal object InputCaptureStartup {
         val detail = output.lineSequence()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
+            .toList()
             .takeLast(4)
             .joinToString(" | ")
             .take(500)
