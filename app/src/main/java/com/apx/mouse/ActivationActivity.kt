@@ -59,7 +59,7 @@ class ActivationActivity : Activity() {
             setHintTextColor(Color.GRAY)
             setTextColor(Color.WHITE)
             textSize = 16f
-            singleLine = true
+            setSingleLine(true)
             backgroundTintList = android.content.res.ColorStateList.valueOf(CYAN)
         }
         root.addView(keyInput, LinearLayout.LayoutParams(
