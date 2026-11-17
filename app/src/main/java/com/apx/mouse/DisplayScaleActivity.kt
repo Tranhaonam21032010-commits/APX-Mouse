@@ -23,7 +23,6 @@ class DisplayScaleActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         window.statusBarColor = Color.rgb(5, 12, 26)
         window.navigationBarColor = Color.rgb(5, 12, 26)
 
@@ -43,8 +42,42 @@ class DisplayScaleActivity : Activity() {
         content.addView(label("APX DISPLAY SCALE", 23f).apply {
             typeface = Typeface.DEFAULT_BOLD
         }, LinearLayout.LayoutParams(-1, dp(42)))
-        content.addView(label("Chỉnh độ phân giải màn hình trong phiên game", 13f, Color.LTGRAY),
+        content.addView(label("Điều chỉnh độ phân giải, DPI và hướng xoay màn hình", 13f, Color.LTGRAY),
             LinearLayout.LayoutParams(-1, dp(30)))
+        content.addView(label("XOAY MÀN HÌNH", 12f, Color.rgb(100, 185, 255)).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            typeface = Typeface.DEFAULT_BOLD
+        }, LinearLayout.LayoutParams(-1, dp(30)))
+
+        val rotations = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        listOf(0, 90, 180, 270).forEach { degrees ->
+            rotations.addView(Button(this).apply {
+                text = "$degrees°"
+                textSize = 13f
+                isAllCaps = false
+                setOnClickListener {
+                    val result = DisplayScaleController.applyRotation(this@DisplayScaleActivity, degrees / 90)
+                    status.text = result.output
+                    Toast.makeText(this@DisplayScaleActivity, result.output, Toast.LENGTH_LONG).show()
+                }
+            }, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                setMargins(dp(3), dp(2), dp(3), dp(4))
+            })
+        }
+        content.addView(rotations, LinearLayout.LayoutParams(-1, dp(54)))
+        content.addView(Button(this).apply {
+            text = "KHÔI PHỤC CHẾ ĐỘ XOAY BAN ĐẦU"
+            isAllCaps = false
+            setOnClickListener {
+                val result = DisplayScaleController.restoreRotation(this@DisplayScaleActivity)
+                status.text = result.output
+                Toast.makeText(this@DisplayScaleActivity, result.output, Toast.LENGTH_LONG).show()
+            }
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+
         content.addView(label("ĐỘ PHÂN GIẢI CÓ SẴN", 12f, Color.rgb(100, 185, 255)).apply {
             gravity = Gravity.CENTER_VERTICAL
             typeface = Typeface.DEFAULT_BOLD
@@ -115,8 +148,17 @@ class DisplayScaleActivity : Activity() {
             setOnClickListener { finish() }
         }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { setMargins(dp(5), dp(3), dp(5), dp(3)) })
         content.addView(buttons, LinearLayout.LayoutParams(-1, dp(60)))
+        content.addView(Button(this).apply {
+            text = "KHÔI PHỤC ĐỘ PHÂN GIẢI, DPI VÀ XOAY"
+            isAllCaps = false
+            setOnClickListener {
+                val result = DisplayScaleController.restore(this@DisplayScaleActivity)
+                status.text = result.output
+                Toast.makeText(this@DisplayScaleActivity, result.output, Toast.LENGTH_LONG).show()
+            }
+        }, LinearLayout.LayoutParams(-1, dp(48)))
         content.addView(label(
-            "Độ phân giải sẽ được khôi phục khi phiên game kết thúc. Tính năng cần Shizuku hoạt động.",
+            "Độ phân giải, DPI và chế độ xoay tạm sẽ được khôi phục khi phiên game kết thúc. Cần Shizuku.",
             11f, Color.LTGRAY
         ), LinearLayout.LayoutParams(-1, dp(38)))
 
@@ -138,6 +180,12 @@ class DisplayScaleActivity : Activity() {
         }
         if (width !in 320..7680 || height !in 320..7680) {
             status.text = "Kích thước hợp lệ: 320 đến 7680"
+            return
+        }
+        val snapshot = DisplayScaleController.captureOriginal(this)
+        if (!snapshot.success) {
+            status.text = "Không lưu được cấu hình màn hình gốc: ${snapshot.output}"
+            Toast.makeText(this, status.text, Toast.LENGTH_LONG).show()
             return
         }
         val result = DisplayScaleController.apply(width, height)
