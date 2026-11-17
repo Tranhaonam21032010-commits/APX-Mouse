@@ -116,11 +116,11 @@ Java_com_apx_mouse_NativeEvdevCapture_startNative(JNIEnv* env,jobject,jobjectArr
         }
         int fd=open(path.c_str(),O_RDONLY|O_NONBLOCK|O_CLOEXEC);
         if(fd<0) { int e=errno; releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -e; }
-        if(ioctl(fd,EVIOCGRAB,1)<0) { int e=errno; close(fd); releaseDevices(s); env->DeleteGlobalRef(s->callback); return -e; }
+        if(ioctl(fd,EVIOCGRAB,1)<0) { int e=errno; close(fd); releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -e; }
         s->devices.push_back(Device{fd,path});
     }
     s->stopFd=eventfd(0,EFD_CLOEXEC|EFD_NONBLOCK);
-    if(s->stopFd<0) { int e=errno; releaseDevices(s); env->DeleteGlobalRef(s->callback); return -e; }
+    if(s->stopFd<0) { int e=errno; releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -e; }
     s->running=true;
     {
         std::lock_guard<std::mutex> lock(gMutex);

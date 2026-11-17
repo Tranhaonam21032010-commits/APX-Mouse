@@ -14,6 +14,29 @@ class InputEngineTest {
         }
     }
 
+    @Test fun rawLinuxPunctuationKeyMapsToAndroidKeyCode() {
+        val sink = RecordingSink()
+        val engine = InputEngine(
+            sink,
+            InputEngine.Config(
+                screenWidth = 1000,
+                screenHeight = 500,
+                keyBindings = mapOf(
+                    KeyEvent.KEYCODE_LEFT_BRACKET to InputEngine.MouseButtonBinding(5, 0.4f, 0.4f)
+                )
+            )
+        )
+        assertTrue(engine.onRawKey("KEY_LEFTBRACE", true))
+        assertTrue(engine.onRawKey("KEY_LEFTBRACE", false))
+        assertEquals(
+            listOf(
+                InputEngine.TouchCommand.Down(5, 399.6f, 199.6f),
+                InputEngine.TouchCommand.Up(5)
+            ),
+            sink.commands
+        )
+    }
+
     @Test fun mappedKeyboardKeyProducesOneDownAndOneUp() {
         val sink = RecordingSink()
         val engine = InputEngine(
