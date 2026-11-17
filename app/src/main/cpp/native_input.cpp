@@ -19,11 +19,13 @@ struct Session {
     JavaVM* vm=nullptr; jobject callback=nullptr; jmethodID onBatch=nullptr; jmethodID onEnded=nullptr;
     int stopFd=-1; std::vector<Device> devices; std::thread worker;
     std::atomic<bool> stop{false}; std::atomic<bool> running{false};
+    std::mutex deviceMutex;
 };
 std::mutex gMutex;
 std::shared_ptr<Session> gSession;
 
 void releaseDevices(const std::shared_ptr<Session>& s) {
+    std::lock_guard<std::mutex> deviceLock(s->deviceMutex);
     for(auto& d:s->devices) if(d.fd>=0) { if(d.grabbed) ioctl(d.fd,EVIOCGRAB,0); d.grabbed=false; close(d.fd); d.fd=-1; }
 }
 
@@ -156,6 +158,7 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_apx_mouse_NativeEvdevCapture_setKeyboardGrabEnabledNative(JNIEnv*,jobject,jboolean enabled) {
     std::lock_guard<std::mutex> lock(gMutex);
     if(!gSession || !gSession->running) return -ENODEV;
+    std::lock_guard<std::mutex> deviceLock(gSession->deviceMutex);
     bool found=false;
     for(auto& d:gSession->devices) {
         if(!d.isKeyboard || d.fd<0) continue;
