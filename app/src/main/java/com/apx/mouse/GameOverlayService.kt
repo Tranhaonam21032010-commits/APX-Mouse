@@ -79,6 +79,7 @@ class GameOverlayService : Service() {
     @Volatile private var inputSessionAllowed = false
     @Volatile private var inputSessionActive = false
     @Volatile private var inputCaptureRunning = false
+    @Volatile private var inputTypingModeEnabled = false
     @Volatile private var lastInputStartAttemptAt = 0L
     @Volatile private var inputEngine: InputEngine? = null
     @Volatile private var inputBackend: ShizukuInputBackend? = null
@@ -421,13 +422,13 @@ class GameOverlayService : Service() {
             .apply()
         inputControlExecutor.execute {
             val result = DisplayScaleController.setInputTypingMode(enabled)
-            mainHandler.post {
+            handler.post {
                 val message = if (enabled) {
                     "Chế độ gõ bật: bàn phím được nhả khỏi mapping"
                 } else {
                     "Chế độ gõ tắt: bàn phím được đưa lại vào mapping"
                 }
-                Toast.makeText(this, if (result.success) message else result.output, Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(this@GameOverlayService, if (result.success) message else result.output, android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }
