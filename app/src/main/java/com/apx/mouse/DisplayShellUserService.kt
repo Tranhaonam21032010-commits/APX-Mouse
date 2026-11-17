@@ -12,10 +12,25 @@ import java.io.InputStreamReader
 /**
  * Runs as Shizuku shell/root identity. Only display-related wm commands are accepted.
  */
-class DisplayShellUserService : IDisplayShellService.Stub() {
+class DisplayShellUserService : IDisplayShellService.Stub(), NativeEvdevCapture.Callback {
     private val inputCaptureLock = Any()
     @Volatile private var inputCaptureProcess: Process? = null
     @Volatile private var inputCaptureThread: Thread? = null
+    @Volatile private var nativeInputCaptureActive = false
+    @Volatile private var nativeInputListener: IInputEventListener? = null
+
+    override fun onNativeInputEventBatch(eventTuples: IntArray) {
+        runCatching { nativeInputListener?.onNativeInputEventBatch(eventTuples) }
+    }
+
+    override fun onNativeInputCaptureEnded(errorCode: Int) {
+        nativeInputCaptureActive = false
+        val listener = nativeInputListener
+        nativeInputListener = null
+        if (errorCode != 0) {
+            runCatching { listener?.onInputCaptureEnded("Native input capture ended (errno=$errorCode)") }
+        }
+    }
 
     override fun destroy() {
         stopInputCapture()
@@ -99,9 +114,21 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
         ) return "ERROR: Chọn từ 1 đến 8 thiết bị input hợp lệ"
 
         synchronized(inputCaptureLock) {
-            if (inputCaptureProcess != null) {
+            if (inputCaptureProcess != null || nativeInputCaptureActive) {
                 return "ERROR: Phiên đọc input đang chạy"
             }
+
+            // Prefer native exclusive capture. Keep getevent as a non-exclusive compatibility fallback.
+            nativeInputListener = listener
+            nativeInputCaptureActive = true
+            val nativeResult = runCatching {
+                NativeEvdevCapture.startNative(paths.toTypedArray(), this)
+            }.getOrElse { -1 }
+            if (nativeResult == 0) {
+                return "OK: Native input capture active (EVIOCGRAB), ${paths.size} devices"
+            }
+            nativeInputCaptureActive = false
+            nativeInputListener = null
 
             val command = listOf("getevent", "-lt") + paths
             val process = try {
@@ -116,7 +143,8 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
                 val diagnostic = runCatching {
                     process.inputStream.bufferedReader().use { it.readText().take(2_000) }
                 }.getOrDefault("")
-                return InputCaptureStartup.failure(process.exitValue(), diagnostic)
+                return InputCaptureStartup.failure(process.exitValue(), diagnostic) +
+                    " | Native capture unavailable (code $nativeResult)"
             }
 
             inputCaptureProcess = process
@@ -131,6 +159,22 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
     }
 
     override fun stopInputCapture(): String {
+        val stopNative = synchronized(inputCaptureLock) {
+            if (nativeInputCaptureActive) {
+                nativeInputCaptureActive = false
+                nativeInputListener = null
+                true
+            } else false
+        }
+        if (stopNative) {
+            return try {
+                NativeEvdevCapture.stopNative()
+                "OK: Native input capture stopped and devices ungrabbed"
+            } catch (e: Throwable) {
+                "ERROR: Native input stop failed: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+
         val session = synchronized(inputCaptureLock) {
             val current = inputCaptureProcess to inputCaptureThread
             inputCaptureProcess = null

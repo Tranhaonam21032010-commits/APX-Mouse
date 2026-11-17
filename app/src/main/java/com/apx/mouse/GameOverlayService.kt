@@ -83,6 +83,7 @@ class GameOverlayService : Service() {
     @Volatile private var inputEngine: InputEngine? = null
     @Volatile private var inputBackend: ShizukuInputBackend? = null
     private val evdevParser = EvdevInputEventParser()
+    private val nativeEventParser = NativeInputEventParser()
 
     private val inputEventListener = object : IInputEventListener.Stub() {
         override fun onInputEventBatch(lines: Array<out String>) {
@@ -92,34 +93,20 @@ class GameOverlayService : Service() {
                     if (!inputSessionActive) return@execute
                     val engine = inputEngine ?: return@execute
                     safeLines.forEach { line ->
-                        evdevParser.parseLine(line).forEach { event ->
-                            when (event) {
-                                is EvdevInputEventParser.Event.Key -> {
-                                    if (editorRoot != null) {
-                                        if (event.pressed && !event.repeat) {
-                                            evdevKeyCode(event.code)?.let(::assignEditorKey)
-                                        }
-                                    } else {
-                                        engine.onRawKey(event.code, event.pressed)
-                                    }
-                                }
-                                is EvdevInputEventParser.Event.MouseButton -> {
-                                    if (editorRoot != null) {
-                                        if (event.pressed) {
-                                            evdevMouseButtonKeyCode(event.code)?.let(::assignEditorKey)
-                                        }
-                                    } else {
-                                        engine.onRawMouseButton(event.code, event.pressed)
-                                    }
-                                }
-                                is EvdevInputEventParser.Event.Relative -> {
-                                    if (editorRoot == null) {
-                                        engine.onRawMouseMotion(event.dx, event.dy)
-                                        engine.onRawWheel(event.wheelX, event.wheelY)
-                                    }
-                                }
-                            }
-                        }
+                        evdevParser.parseLine(line).forEach { event -> dispatchInputEvent(event, engine) }
+                    }
+                }
+            }
+        }
+
+        override fun onNativeInputEventBatch(eventTuples: IntArray) {
+            val safeTuples = eventTuples.copyOf(eventTuples.size.coerceAtMost(1024))
+            runCatching {
+                inputDispatchExecutor.execute {
+                    if (!inputSessionActive) return@execute
+                    val engine = inputEngine ?: return@execute
+                    nativeEventParser.parseBatch(safeTuples).forEach { event ->
+                        dispatchInputEvent(event, engine)
                     }
                 }
             }
@@ -151,7 +138,7 @@ class GameOverlayService : Service() {
                         backend?.close()
                         inputCaptureRunning = false
                         runCatching {
-                            inputDispatchExecutor.execute { evdevParser.reset() }
+                            inputDispatchExecutor.execute { evdevParser.reset(); nativeEventParser.reset() }
                         }
                     }
                 }
@@ -400,6 +387,27 @@ class GameOverlayService : Service() {
         }
     }
 
+    private fun dispatchInputEvent(event: EvdevInputEventParser.Event, engine: InputEngine) {
+        when (event) {
+            is EvdevInputEventParser.Event.Key -> {
+                if (editorRoot != null) {
+                    if (event.pressed && !event.repeat) evdevKeyCode(event.code)?.let(::assignEditorKey)
+                } else engine.onRawKey(event.code, event.pressed)
+            }
+            is EvdevInputEventParser.Event.MouseButton -> {
+                if (editorRoot != null) {
+                    if (event.pressed) evdevMouseButtonKeyCode(event.code)?.let(::assignEditorKey)
+                } else engine.onRawMouseButton(event.code, event.pressed)
+            }
+            is EvdevInputEventParser.Event.Relative -> {
+                if (editorRoot == null) {
+                    engine.onRawMouseMotion(event.dx, event.dy)
+                    engine.onRawWheel(event.wheelX, event.wheelY)
+                }
+            }
+        }
+    }
+
     private fun startInputCaptureIfEnabled() {
         if (!inputSessionAllowed || inputCaptureRunning || inputCaptureStarting.get()) return
         val settings = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
@@ -448,6 +456,7 @@ class GameOverlayService : Service() {
                     inputBackend = createdBackend
                     inputEngine = engine
                     evdevParser.reset()
+                    nativeEventParser.reset()
                     inputSessionActive = true
 
                     // Set before the Binder call: getevent can exit and report its callback

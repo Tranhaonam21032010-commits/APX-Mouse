@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.apx.mouse"
     compileSdk = 35
+    ndkVersion = "27.2.12479018"
 
     buildFeatures {
         aidl = true
@@ -17,6 +18,8 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "1.2"
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
     }
 
     compileOptions {
@@ -26,6 +29,12 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 }
 
