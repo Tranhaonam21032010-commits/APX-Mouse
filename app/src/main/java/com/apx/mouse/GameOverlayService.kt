@@ -196,6 +196,8 @@ class GameOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        inputTypingModeEnabled = getSharedPreferences("apx_mouse", MODE_PRIVATE)
+            .getBoolean("input_typing_mode", false)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
@@ -282,7 +284,8 @@ class GameOverlayService : Service() {
         // touchable window would steal taps from the game across its whole rectangle.
         val positions = listOf(
             Triple(96, 0, 52), Triple(30, 46, 52), Triple(0, 106, 52),
-            Triple(36, 166, 52), Triple(112, 166, 52), Triple(172, 46, 52), Triple(172, 106, 52)
+            Triple(36, 166, 52), Triple(112, 166, 52), Triple(172, 46, 52), Triple(172, 106, 52),
+            Triple(172, 166, 52)
         )
         val actions = listOf(
             createAction("⌨", "Chỉnh sửa keymap") { openMappingEditor() },
@@ -295,7 +298,8 @@ class GameOverlayService : Service() {
             },
             createAction("⚙", "Chỉnh độ phân giải game") { openDisplayScale() },
             createAction("⌄", "Đóng menu") { setFanOpen(false) },
-            createAction("×", "Tắt overlay APX") { stopSelf() }
+            createAction("×", "Tắt overlay APX") { stopSelf() },
+            createAction("T", "Chế độ gõ: nhả bàn phím") { toggleInputTypingMode() }
         )
         actions.forEachIndexed { index, view ->
             val (left, top, size) = positions[index]
@@ -390,6 +394,7 @@ class GameOverlayService : Service() {
     private fun dispatchInputEvent(event: EvdevInputEventParser.Event, engine: InputEngine) {
         when (event) {
             is EvdevInputEventParser.Event.Key -> {
+                if (inputTypingModeEnabled) return
                 if (editorRoot != null) {
                     if (event.pressed && !event.repeat) evdevKeyCode(event.code)?.let(::assignEditorKey)
                 } else engine.onRawKey(event.code, event.pressed)
@@ -404,6 +409,25 @@ class GameOverlayService : Service() {
                     engine.onRawMouseMotion(event.dx, event.dy)
                     engine.onRawWheel(event.wheelX, event.wheelY)
                 }
+            }
+        }
+    }
+
+    private fun toggleInputTypingMode() {
+        val enabled = !inputTypingModeEnabled
+        inputTypingModeEnabled = enabled
+        getSharedPreferences("apx_mouse", MODE_PRIVATE).edit()
+            .putBoolean("input_typing_mode", enabled)
+            .apply()
+        inputControlExecutor.execute {
+            val result = DisplayScaleController.setInputTypingMode(enabled)
+            mainHandler.post {
+                val message = if (enabled) {
+                    "Chế độ gõ bật: bàn phím được nhả khỏi mapping"
+                } else {
+                    "Chế độ gõ tắt: bàn phím được đưa lại vào mapping"
+                }
+                Toast.makeText(this, if (result.success) message else result.output, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -442,6 +466,7 @@ class GameOverlayService : Service() {
                     }
                     if (!inputSessionAllowed || !serviceActive.get()) return@execute
 
+                    DisplayScaleController.setInputTypingMode(inputTypingModeEnabled)
                     val engineConfig = createGameInputConfig()
                     val createdBackend = ShizukuInputBackend(object : ShizukuInputBackend.Listener {
                         override fun onStatus(message: String) {
