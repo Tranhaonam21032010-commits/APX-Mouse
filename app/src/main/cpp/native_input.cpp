@@ -25,6 +25,9 @@ std::shared_ptr<Session> gSession;
 
 void releaseDevices(const std::shared_ptr<Session>& s) {
     for(auto& d:s->devices) if(d.fd>=0) { ioctl(d.fd,EVIOCGRAB,0); close(d.fd); d.fd=-1; }
+}
+
+void releaseStopFd(const std::shared_ptr<Session>& s) {
     if(s->stopFd>=0) { close(s->stopFd); s->stopFd=-1; }
 }
 bool flush(JNIEnv* env,const std::shared_ptr<Session>& s,std::vector<jint>& batch) {
@@ -93,6 +96,7 @@ Java_com_apx_mouse_NativeEvdevCapture_startNative(JNIEnv* env,jobject,jobjectArr
     std::shared_ptr<Session> stale;
     { std::lock_guard<std::mutex> lock(gMutex); if(gSession&&gSession->running) return -EBUSY; stale=gSession; gSession.reset(); }
     if(stale&&stale->worker.joinable()) stale->worker.join();
+    if(stale) releaseStopFd(stale);
     auto s=std::make_shared<Session>();
     if(env->GetJavaVM(&s->vm)!=JNI_OK) return -EFAULT;
     jclass cls=env->GetObjectClass(callback); if(!cls) return -EFAULT;
@@ -103,15 +107,15 @@ Java_com_apx_mouse_NativeEvdevCapture_startNative(JNIEnv* env,jobject,jobjectArr
     s->callback=env->NewGlobalRef(callback); if(!s->callback) return -ENOMEM;
     for(jsize i=0;i<count;++i) {
         auto obj=static_cast<jstring>(env->GetObjectArrayElement(paths,i));
-        if(!obj) { releaseDevices(s); env->DeleteGlobalRef(s->callback); return -EINVAL; }
+        if(!obj) { releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -EINVAL; }
         const char* chars=env->GetStringUTFChars(obj,nullptr);
-        if(!chars) { env->DeleteLocalRef(obj); releaseDevices(s); env->DeleteGlobalRef(s->callback); return -ENOMEM; }
+        if(!chars) { env->DeleteLocalRef(obj); releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -ENOMEM; }
         std::string path(chars); env->ReleaseStringUTFChars(obj,chars); env->DeleteLocalRef(obj);
         if(path.rfind("/dev/input/event",0)!=0||path.size()<=16||path.find_first_not_of("0123456789",16)!=std::string::npos) {
-            releaseDevices(s); env->DeleteGlobalRef(s->callback); return -EINVAL;
+            releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -EINVAL;
         }
         int fd=open(path.c_str(),O_RDONLY|O_NONBLOCK|O_CLOEXEC);
-        if(fd<0) { int e=errno; releaseDevices(s); env->DeleteGlobalRef(s->callback); return -e; }
+        if(fd<0) { int e=errno; releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -e; }
         if(ioctl(fd,EVIOCGRAB,1)<0) { int e=errno; close(fd); releaseDevices(s); env->DeleteGlobalRef(s->callback); return -e; }
         s->devices.push_back(Device{fd,path});
     }
@@ -120,10 +124,10 @@ Java_com_apx_mouse_NativeEvdevCapture_startNative(JNIEnv* env,jobject,jobjectArr
     s->running=true;
     {
         std::lock_guard<std::mutex> lock(gMutex);
-        if(gSession) { s->running=false; releaseDevices(s); env->DeleteGlobalRef(s->callback); return -EBUSY; }
+        if(gSession) { s->running=false; releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -EBUSY; }
         gSession=s;
         try { s->worker=std::thread(worker,s); }
-        catch(...) { gSession.reset(); s->running=false; releaseDevices(s); env->DeleteGlobalRef(s->callback); s->callback=nullptr; return -EAGAIN; }
+        catch(...) { gSession.reset(); s->running=false; releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); s->callback=nullptr; return -EAGAIN; }
     }
     return 0;
 }
@@ -134,6 +138,7 @@ Java_com_apx_mouse_NativeEvdevCapture_stopNative(JNIEnv*,jobject) {
     { std::lock_guard<std::mutex> lock(gMutex); s=gSession; if(!s) return; s->stop=true; if(s->stopFd>=0) eventfd_write(s->stopFd,1); }
     if(s->worker.joinable()&&s->worker.get_id()!=std::this_thread::get_id()) s->worker.join();
     { std::lock_guard<std::mutex> lock(gMutex); if(gSession==s) gSession.reset(); }
+    releaseStopFd(s);
 }
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_apx_mouse_NativeEvdevCapture_isRunningNative(JNIEnv*,jobject) {

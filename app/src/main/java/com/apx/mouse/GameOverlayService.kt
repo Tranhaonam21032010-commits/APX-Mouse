@@ -550,7 +550,7 @@ class GameOverlayService : Service() {
                 inputBackend = null
                 backend?.close()
                 inputCaptureRunning = false
-                runCatching { inputDispatchExecutor.execute { evdevParser.reset() } }
+                runCatching { inputDispatchExecutor.execute { evdevParser.reset(); nativeEventParser.reset() } }
             }
         }
     }
