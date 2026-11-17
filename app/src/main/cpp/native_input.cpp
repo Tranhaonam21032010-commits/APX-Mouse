@@ -14,7 +14,7 @@
 #include <vector>
 
 namespace {
-struct Device { int fd=-1; std::string path; };
+struct Device { int fd=-1; std::string path; bool isKeyboard=false; bool grabbed=false; };
 struct Session {
     JavaVM* vm=nullptr; jobject callback=nullptr; jmethodID onBatch=nullptr; jmethodID onEnded=nullptr;
     int stopFd=-1; std::vector<Device> devices; std::thread worker;
@@ -24,7 +24,7 @@ std::mutex gMutex;
 std::shared_ptr<Session> gSession;
 
 void releaseDevices(const std::shared_ptr<Session>& s) {
-    for(auto& d:s->devices) if(d.fd>=0) { ioctl(d.fd,EVIOCGRAB,0); close(d.fd); d.fd=-1; }
+    for(auto& d:s->devices) if(d.fd>=0) { if(d.grabbed) ioctl(d.fd,EVIOCGRAB,0); d.grabbed=false; close(d.fd); d.fd=-1; }
 }
 
 void releaseStopFd(const std::shared_ptr<Session>& s) {
@@ -116,8 +116,15 @@ Java_com_apx_mouse_NativeEvdevCapture_startNative(JNIEnv* env,jobject,jobjectArr
         }
         int fd=open(path.c_str(),O_RDONLY|O_NONBLOCK|O_CLOEXEC);
         if(fd<0) { int e=errno; releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -e; }
+        constexpr size_t wordBits = sizeof(unsigned long) * 8;
+        unsigned long keyBits[(KEY_MAX + wordBits) / wordBits] = {};
+        const bool haveKeyBits = ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keyBits)), keyBits) >= 0;
+        const auto hasKey = [&](int code) {
+            return haveKeyBits && (keyBits[code / wordBits] & (1UL << (code % wordBits))) != 0;
+        };
+        const bool isKeyboard = hasKey(KEY_A) && hasKey(KEY_W) && hasKey(KEY_ENTER);
         if(ioctl(fd,EVIOCGRAB,1)<0) { int e=errno; close(fd); releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -e; }
-        s->devices.push_back(Device{fd,path});
+        s->devices.push_back(Device{fd,path,isKeyboard,true});
     }
     s->stopFd=eventfd(0,EFD_CLOEXEC|EFD_NONBLOCK);
     if(s->stopFd<0) { int e=errno; releaseDevices(s); releaseStopFd(s); env->DeleteGlobalRef(s->callback); return -e; }
@@ -143,4 +150,20 @@ Java_com_apx_mouse_NativeEvdevCapture_stopNative(JNIEnv*,jobject) {
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_apx_mouse_NativeEvdevCapture_isRunningNative(JNIEnv*,jobject) {
     std::lock_guard<std::mutex> lock(gMutex); return gSession&&gSession->running?JNI_TRUE:JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_apx_mouse_NativeEvdevCapture_setKeyboardGrabEnabledNative(JNIEnv*,jobject,jboolean enabled) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    if(!gSession || !gSession->running) return -ENODEV;
+    bool found=false;
+    for(auto& d:gSession->devices) {
+        if(!d.isKeyboard || d.fd<0) continue;
+        found=true;
+        const bool shouldGrab = enabled == JNI_TRUE;
+        if(d.grabbed == shouldGrab) continue;
+        if(ioctl(d.fd,EVIOCGRAB,shouldGrab ? 1 : 0)<0) return -errno;
+        d.grabbed=shouldGrab;
+    }
+    return found ? 0 : -ENODEV;
 }

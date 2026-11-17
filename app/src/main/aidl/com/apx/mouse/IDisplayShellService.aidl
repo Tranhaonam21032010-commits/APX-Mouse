@@ -8,6 +8,7 @@ interface IDisplayShellService {
     String captureInputEvents(int seconds, in String[] eventPaths);
     String startInputCapture(in String[] eventPaths, IInputEventListener listener);
     String stopInputCapture();
+    String setInputTypingMode(boolean enabled);
     String execute(String command);
     String probeTouchInjection();
     String injectTouchFrame(int action, in int[] pointerIds, in float[] xs, in float[] ys, long downTime, long eventTime);

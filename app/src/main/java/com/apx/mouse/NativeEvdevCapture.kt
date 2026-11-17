@@ -14,4 +14,5 @@ object NativeEvdevCapture {
     external fun startNative(eventPaths: Array<String>, callback: Callback): Int
     external fun stopNative()
     external fun isRunningNative(): Boolean
+    external fun setKeyboardGrabEnabledNative(enabled: Boolean): Int
 }

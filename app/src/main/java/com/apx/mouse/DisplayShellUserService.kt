@@ -18,6 +18,7 @@ class DisplayShellUserService : IDisplayShellService.Stub(), NativeEvdevCapture.
     @Volatile private var inputCaptureThread: Thread? = null
     @Volatile private var nativeInputCaptureActive = false
     @Volatile private var nativeInputListener: IInputEventListener? = null
+    @Volatile private var inputTypingModeEnabled = false
 
     override fun onNativeInputEventBatch(eventTuples: IntArray) {
         runCatching { nativeInputListener?.onNativeInputEventBatch(eventTuples) }
@@ -125,6 +126,10 @@ class DisplayShellUserService : IDisplayShellService.Stub(), NativeEvdevCapture.
                 NativeEvdevCapture.startNative(paths.toTypedArray(), this)
             }.getOrElse { -1 }
             if (nativeResult == 0) {
+                if (inputTypingModeEnabled) {
+                    // Typing mode mirrors K7XD: release keyboard nodes while keeping mouse grabbed.
+                    runCatching { NativeEvdevCapture.setKeyboardGrabEnabledNative(false) }
+                }
                 return "OK: Native input capture active (EVIOCGRAB), ${paths.size} devices"
             }
             nativeInputCaptureActive = false
@@ -156,6 +161,24 @@ class DisplayShellUserService : IDisplayShellService.Stub(), NativeEvdevCapture.
             reader.start()
         }
         return "OK: Đang đọc ${paths.size} thiết bị input đã chọn"
+    }
+
+    override fun setInputTypingMode(enabled: Boolean): String {
+        inputTypingModeEnabled = enabled
+        if (!nativeInputCaptureActive) {
+            return "OK: Typing mode will apply when native capture starts"
+        }
+        return try {
+            val result = NativeEvdevCapture.setKeyboardGrabEnabledNative(!enabled)
+            when {
+                result == 0 && enabled -> "OK: Typing mode on; keyboard released, mouse remains grabbed"
+                result == 0 -> "OK: Typing mode off; keyboard grabbed again"
+                result == -19 -> "OK: No keyboard device is currently selected"
+                else -> "ERROR: Cannot change keyboard grab state (code $result)"
+            }
+        } catch (e: Throwable) {
+            "ERROR: Typing mode change failed: ${e.message ?: e.javaClass.simpleName}"
+        }
     }
 
     override fun stopInputCapture(): String {

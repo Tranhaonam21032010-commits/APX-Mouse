@@ -22,7 +22,7 @@ object DisplayScaleController {
     private const val KEY_ROTATION_CAPTURED = "display_rotation_original_captured"
     private const val KEY_ROTATION_AUTO = "display_rotation_original_auto"
     private const val KEY_ROTATION_USER = "display_rotation_original_user"
-    private const val SERVICE_VERSION = 5
+    private const val SERVICE_VERSION = 6
 
     data class Result(val success: Boolean, val output: String)
 
@@ -159,6 +159,18 @@ object DisplayScaleController {
             Result(!output.startsWith("ERROR:"), output)
         } catch (e: Exception) {
             Result(false, "Lỗi dừng đọc input: ${e.message}")
+        }
+    }
+
+    fun setInputTypingMode(enabled: Boolean): Result {
+        val service = shell
+        if (service == null || service.asBinder()?.isBinderAlive != true)
+            return Result(false, bindError ?: "Shizuku UserService chưa sẵn sàng")
+        return try {
+            val output = service.setInputTypingMode(enabled).trim()
+            Result(!output.startsWith("ERROR:"), output)
+        } catch (e: Exception) {
+            Result(false, "Lỗi đổi chế độ gõ: ${e.message}")
         }
     }
 
