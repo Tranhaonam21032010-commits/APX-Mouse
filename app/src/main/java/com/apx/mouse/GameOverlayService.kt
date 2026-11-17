@@ -475,7 +475,7 @@ class GameOverlayService : Service() {
                         postInputStatus(result.output)
                         return@execute
                     }
-                    postInputStatus("Đã bật nhận chuột / bàn phím cho phiên game.")
+                    postInputStatus("Đã bật nhận chuột / bàn phím cho phiên game: ${result.output.take(180)}")
                 } catch (e: Exception) {
                     inputCaptureRunning = false
                     inputSessionActive = false

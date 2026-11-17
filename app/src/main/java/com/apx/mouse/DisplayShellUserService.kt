@@ -10,7 +10,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 
 /**
- * Runs as Shizuku shell/root identity. Only display-related wm commands are accepted.
+ * Runs as Shizuku UserService identity for display commands and selected evdev input capture.
  */
 class DisplayShellUserService : IDisplayShellService.Stub(), NativeEvdevCapture.Callback {
     private val inputCaptureLock = Any()

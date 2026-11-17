@@ -50,7 +50,9 @@ class ShizukuInputBackend(
                 enqueueTouch { sendFrame(touchState.move(command.pointer, command.x, command.y)) }
             is InputEngine.TouchCommand.Up ->
                 enqueueTouch { sendFrame(touchState.up(command.pointer)) }
-            // Continuous movement is translated into explicit pointer MOVE frames by InputEngine.
+            // K7XD's FPS-camera path is a DOWN/MOVE/UP swipe, but its sensitivity,
+            // resistance, edge-reset, and trigger rules are not ported yet.
+            // Do not silently guess those semantics from raw mouse deltas.
             is InputEngine.TouchCommand.AimDelta -> Unit
             is InputEngine.TouchCommand.Joystick -> Unit
             // Wheel mapping is intentionally not assigned a game action until the user configures one.
