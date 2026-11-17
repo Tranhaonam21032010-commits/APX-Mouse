@@ -453,7 +453,27 @@ class InputEngine(
             "KPENTER" -> "NUMPAD_ENTER"
             else -> suffix
         }
-        val code = KeyEvent.keyCodeFromString("KEYCODE_$androidSuffix")
+        val code = when (suffix) {
+            "LEFTBRACE" -> KeyEvent.KEYCODE_LEFT_BRACKET
+            "RIGHTBRACE" -> KeyEvent.KEYCODE_RIGHT_BRACKET
+            "DOT" -> KeyEvent.KEYCODE_PERIOD
+            "EQUAL" -> KeyEvent.KEYCODE_EQUALS
+            "KPPLUS" -> KeyEvent.KEYCODE_NUMPAD_ADD
+            "KPMINUS" -> KeyEvent.KEYCODE_NUMPAD_SUBTRACT
+            "KPSLASH" -> KeyEvent.KEYCODE_NUMPAD_DIVIDE
+            "KPDOT" -> KeyEvent.KEYCODE_NUMPAD_DOT
+            "KP0" -> KeyEvent.KEYCODE_NUMPAD_0
+            "KP1" -> KeyEvent.KEYCODE_NUMPAD_1
+            "KP2" -> KeyEvent.KEYCODE_NUMPAD_2
+            "KP3" -> KeyEvent.KEYCODE_NUMPAD_3
+            "KP4" -> KeyEvent.KEYCODE_NUMPAD_4
+            "KP5" -> KeyEvent.KEYCODE_NUMPAD_5
+            "KP6" -> KeyEvent.KEYCODE_NUMPAD_6
+            "KP7" -> KeyEvent.KEYCODE_NUMPAD_7
+            "KP8" -> KeyEvent.KEYCODE_NUMPAD_8
+            "KP9" -> KeyEvent.KEYCODE_NUMPAD_9
+            else -> KeyEvent.keyCodeFromString("KEYCODE_$androidSuffix")
+        }
         return code.takeIf { it != KeyEvent.KEYCODE_UNKNOWN }
     }
 
