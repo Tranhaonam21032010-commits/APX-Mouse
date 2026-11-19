@@ -16,7 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * InputManager API. Device/API permission support must be verified on the target phone.
  */
 class ShizukuInputBackend(
-    private val listener: Listener
+    private val listener: Listener,
+    private val displayWidth: Int = 0,
+    private val displayHeight: Int = 0
 ) : InputEngine.CommandSink, AutoCloseable {
 
     interface Listener {
@@ -153,15 +155,20 @@ class ShizukuInputBackend(
     private var targetCenterY = 0f
 
     private fun createFpsAimProcessor(): FpsAimProcessor? {
-        val result = DisplayScaleController.execute("wm size")
-        if (!result.success) return null
-        val text = result.output
-        val sizeMatch = Regex("Override size:\\s*(\\d+)x(\\d+)").find(text)
-            ?: Regex("Physical size:\\s*(\\d+)x(\\d+)").find(text)
-            ?: Regex("(?:Override|Physical) size:\\s*(\\d+)x(\\d+)").find(text)
-            ?: return null
-        val width = sizeMatch.groupValues[1].toIntOrNull() ?: return null
-        val height = sizeMatch.groupValues[2].toIntOrNull() ?: return null
+        val dimensions = if (displayWidth > 0 && displayHeight > 0) {
+            displayWidth to displayHeight
+        } else {
+            val result = DisplayScaleController.execute("wm size")
+            if (!result.success) return null
+            val text = result.output
+            val sizeMatch = Regex("Override size:\\s*(\\d+)x(\\d+)").find(text)
+                ?: Regex("Physical size:\\s*(\\d+)x(\\d+)").find(text)
+                ?: return null
+            (sizeMatch.groupValues[1].toIntOrNull() ?: return null) to
+                (sizeMatch.groupValues[2].toIntOrNull() ?: return null)
+        }
+        val width = dimensions.first
+        val height = dimensions.second
         if (width <= 0 || height <= 0) return null
         targetCenterX = (width - 1) / 2f
         targetCenterY = (height - 1) / 2f
