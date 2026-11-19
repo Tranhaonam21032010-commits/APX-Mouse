@@ -40,6 +40,9 @@ class ShizukuInputBackend(
     // Accessed only on executor to preserve Android pointer ordering.
     private val touchState = TouchFrameState()
     private var gestureDownTime = 0L
+    // Pointer 31 is reserved for the short FPS-camera swipe gesture.
+    private val fpsAimPointerId = 31
+    private var fpsAimProcessor: FpsAimProcessor? = null
 
     override fun onCommand(command: InputEngine.TouchCommand) {
         if (closed.get()) return
@@ -50,10 +53,8 @@ class ShizukuInputBackend(
                 enqueueTouch { sendFrame(touchState.move(command.pointer, command.x, command.y)) }
             is InputEngine.TouchCommand.Up ->
                 enqueueTouch { sendFrame(touchState.up(command.pointer)) }
-            // K7XD's FPS-camera path is a DOWN/MOVE/UP swipe, but its sensitivity,
-            // resistance, edge-reset, and trigger rules are not ported yet.
-            // Do not silently guess those semantics from raw mouse deltas.
-            is InputEngine.TouchCommand.AimDelta -> Unit
+            // One relative sample becomes a short, bounded DOWN -> MOVE -> UP swipe.
+            is InputEngine.TouchCommand.AimDelta -> enqueueTouch { sendAimDelta(command.dx, command.dy) }
             is InputEngine.TouchCommand.Joystick -> Unit
             // Wheel mapping is intentionally not assigned a game action until the user configures one.
             is InputEngine.TouchCommand.Wheel -> Unit
@@ -125,6 +126,51 @@ class ShizukuInputBackend(
     private fun enqueueTouch(block: () -> Unit) {
         runCatching { executor.execute { if (!closed.get()) block() } }
             .onFailure { postStatus("Không thể xếp hàng touch frame: ${it.message}") }
+    }
+
+    private fun sendAimDelta(dx: Float, dy: Float) {
+        if (!dx.isFinite() || !dy.isFinite() || (dx == 0f && dy == 0f)) return
+        val processor = fpsAimProcessor ?: createFpsAimProcessor().also {
+            fpsAimProcessor = it
+        } ?: run {
+            postStatus("Không đọc được kích thước màn hình; chưa thể khởi tạo FPS Mouse Look.")
+            return
+        }
+        val target = processor.target(dx, dy) ?: return
+        val centerX = targetCenterX
+        val centerY = targetCenterY
+
+        // Reuse the same serialized multi-pointer state as key/button mappings.
+        // This keeps ACTION_POINTER_DOWN/UP ordering valid when another mapping is held.
+        sendFrame(touchState.down(fpsAimPointerId, centerX, centerY))
+        if (gestureDownTime <= 0L) return
+        sendFrame(touchState.move(fpsAimPointerId, target.x, target.y))
+        if (gestureDownTime <= 0L) return
+        sendFrame(touchState.up(fpsAimPointerId))
+    }
+
+    private var targetCenterX = 0f
+    private var targetCenterY = 0f
+
+    private fun createFpsAimProcessor(): FpsAimProcessor? {
+        val result = DisplayScaleController.execute("wm size")
+        if (!result.success) return null
+        val text = result.output
+        val sizeMatch = Regex("Override size:\\s*(\\d+)x(\\d+)").find(text)
+            ?: Regex("Physical size:\\s*(\\d+)x(\\d+)").find(text)
+            ?: Regex("(?:Override|Physical) size:\\s*(\\d+)x(\\d+)").find(text)
+            ?: return null
+        val width = sizeMatch.groupValues[1].toIntOrNull() ?: return null
+        val height = sizeMatch.groupValues[2].toIntOrNull() ?: return null
+        if (width <= 0 || height <= 0) return null
+        targetCenterX = (width - 1) / 2f
+        targetCenterY = (height - 1) / 2f
+        val radius = minOf(width, height) * 0.30f
+        return FpsAimProcessor(
+            centerX = targetCenterX,
+            centerY = targetCenterY,
+            radius = radius
+        )
     }
 
     private fun sendFrame(frame: TouchFrameState.Frame?) {
