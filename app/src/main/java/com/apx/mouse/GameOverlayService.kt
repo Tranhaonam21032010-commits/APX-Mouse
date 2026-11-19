@@ -476,7 +476,7 @@ class GameOverlayService : Service() {
                         override fun onTapResult(success: Boolean, message: String) {
                             if (!success) android.util.Log.w("APX-MOUSE-INPUT", message)
                         }
-                    })
+                    }, engineConfig.screenWidth, engineConfig.screenHeight)
                     backend = createdBackend
                     val engine = InputEngine(createdBackend, engineConfig)
                     inputBackend = createdBackend
