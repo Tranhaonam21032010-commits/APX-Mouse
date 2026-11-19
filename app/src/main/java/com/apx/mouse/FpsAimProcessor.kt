@@ -23,7 +23,8 @@ internal class FpsAimProcessor(
     fun target(rawDx: Float, rawDy: Float): Point? {
         if (!rawDx.isFinite() || !rawDy.isFinite() ||
             !centerX.isFinite() || !centerY.isFinite() ||
-            !radius.isFinite() || radius <= 0f
+            !radius.isFinite() || radius <= 0f ||
+            !sensitivityX.isFinite() || !sensitivityY.isFinite()
         ) return null
 
         var dx = rawDx * sensitivityX.coerceIn(0.1f, 3f) * if (invertX) -1f else 1f
