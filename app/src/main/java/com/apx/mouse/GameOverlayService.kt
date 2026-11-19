@@ -50,6 +50,10 @@ class GameOverlayService : Service() {
     @Volatile private var editorRoot: FrameLayout? = null
     private var editorCaptureArmed = false
     private val editorPoints = mutableListOf<EditorPoint>()
+    private var editorJoystickCenterX = 0.18f
+    private var editorJoystickCenterY = 0.78f
+    private var editorJoystickRadius = 0.12f
+    private var editorJoystickEditMode = false
     @Volatile private var editorSelected = -1
     private var editorGamePackage = ""
     private var editorCanvas: View? = null
@@ -1027,7 +1031,12 @@ class GameOverlayService : Service() {
         editorPoints.clear()
         editorSelected = -1
         editorCaptureArmed = false
-        val raw = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE).getString(KEY_PREFIX + editorGamePackage, null)
+        editorJoystickEditMode = false
+        val editorPrefs = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+        editorJoystickCenterX = editorPrefs.getFloat("joystick_center_x_$editorGamePackage", 0.18f).coerceIn(0.05f, 0.95f)
+        editorJoystickCenterY = editorPrefs.getFloat("joystick_center_y_$editorGamePackage", 0.78f).coerceIn(0.05f, 0.95f)
+        editorJoystickRadius = editorPrefs.getFloat("joystick_radius_$editorGamePackage", 0.12f).coerceIn(0.04f, 0.30f)
+        val raw = editorPrefs.getString(KEY_PREFIX + editorGamePackage, null)
         try {
             if (!raw.isNullOrBlank()) {
                 val array = JSONArray(raw)
@@ -1066,6 +1075,21 @@ class GameOverlayService : Service() {
             private var dragging = false
             override fun onDraw(c: Canvas) {
                 super.onDraw(c)
+                val joystickRadiusPx = editorJoystickRadius * minOf(width, height)
+                val joystickX = editorJoystickCenterX * width
+                val joystickY = editorJoystickCenterY * height
+                p.style = Paint.Style.FILL
+                p.color = Color.argb(45, 0, 190, 255)
+                c.drawCircle(joystickX, joystickY, joystickRadiusPx, p)
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = dp(3).toFloat()
+                p.color = if (editorJoystickEditMode) Color.rgb(255, 190, 70) else Color.rgb(0, 190, 255)
+                c.drawCircle(joystickX, joystickY, joystickRadiusPx, p)
+                p.style = Paint.Style.FILL
+                p.color = Color.WHITE
+                p.textSize = dp(12).toFloat()
+                p.textAlign = Paint.Align.CENTER
+                c.drawText("JOYSTICK", joystickX, joystickY + dp(4).toFloat(), p)
                 editorPoints.forEachIndexed { index, point ->
                     val cx = point.x * width
                     val cy = point.y * height
@@ -1087,6 +1111,14 @@ class GameOverlayService : Service() {
             override fun onTouchEvent(e: MotionEvent): Boolean {
                 when (e.action) {
                     MotionEvent.ACTION_DOWN -> {
+                        if (editorJoystickEditMode) {
+                            editorJoystickCenterX = (e.x / width.coerceAtLeast(1)).coerceIn(0.05f, 0.95f)
+                            editorJoystickCenterY = (e.y / height.coerceAtLeast(1)).coerceIn(0.05f, 0.95f)
+                            dragging = true
+                            editorSelected = -1
+                            invalidate()
+                            return true
+                        }
                         val hit = editorPoints.indices.reversed().firstOrNull { i ->
                             val dx = editorPoints[i].x * width - e.x
                             val dy = editorPoints[i].y * height - e.y
@@ -1115,7 +1147,12 @@ class GameOverlayService : Service() {
                         root.requestFocus()
                         return true
                     }
-                    MotionEvent.ACTION_MOVE -> if (dragging && editorSelected in editorPoints.indices) {
+                    MotionEvent.ACTION_MOVE -> if (dragging && editorJoystickEditMode) {
+                        editorJoystickCenterX = (e.x / width.coerceAtLeast(1)).coerceIn(0.05f, 0.95f)
+                        editorJoystickCenterY = (e.y / height.coerceAtLeast(1)).coerceIn(0.05f, 0.95f)
+                        invalidate()
+                        return true
+                    } else if (dragging && editorSelected in editorPoints.indices) {
                         editorPoints[editorSelected].x = (e.x / width.coerceAtLeast(1)).coerceIn(0f, 1f)
                         editorPoints[editorSelected].y = (e.y / height.coerceAtLeast(1)).coerceIn(0f, 1f)
                         invalidate()
@@ -1146,7 +1183,27 @@ class GameOverlayService : Service() {
                 isClickable = true; setOnClickListener { action() }
             }, LinearLayout.LayoutParams(-2, dp(42)))
         }
+        tool("Joystick") {
+            editorJoystickEditMode = !editorJoystickEditMode
+            editorSelected = -1
+            editorCaptureArmed = false
+            android.widget.Toast.makeText(
+                this@GameOverlayService,
+                if (editorJoystickEditMode) "Kéo trên màn hình để đặt tâm joystick" else "Đã khóa chỉnh vị trí joystick",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            canvas.invalidate()
+        }
+        tool("J−") {
+            editorJoystickRadius = (editorJoystickRadius - 0.01f).coerceAtLeast(0.04f)
+            canvas.invalidate()
+        }
+        tool("J+") {
+            editorJoystickRadius = (editorJoystickRadius + 0.01f).coerceAtMost(0.30f)
+            canvas.invalidate()
+        }
         tool("＋ Thêm") {
+            editorJoystickEditMode = false
             if (editorPoints.size >= MAX_MAPPED_POINTS) {
                 android.widget.Toast.makeText(
                     this@GameOverlayService,
@@ -1200,7 +1257,7 @@ class GameOverlayService : Service() {
             topMargin = dp(8)
         })
         val hint = TextView(this).apply {
-            text = "Chạm vị trí để thêm · Kéo để di chuyển · Chọn điểm rồi bấm phím hoặc nút chuột để gán (tối đa 9 điểm)"
+            text = "Joystick: chọn Joystick rồi kéo tâm; J−/J+ chỉnh bán kính · Thêm điểm và gán phím/chuột (tối đa 9 điểm)"
             textSize = 11f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             setPadding(dp(8), dp(5), dp(8), dp(5))
             background = GradientDrawable().apply {
@@ -1239,6 +1296,9 @@ class GameOverlayService : Service() {
         }
         getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE).edit()
             .putString(KEY_PREFIX + editorGamePackage, array.toString())
+            .putFloat("joystick_center_x_$editorGamePackage", editorJoystickCenterX)
+            .putFloat("joystick_center_y_$editorGamePackage", editorJoystickCenterY)
+            .putFloat("joystick_radius_$editorGamePackage", editorJoystickRadius)
             .putBoolean(VISIBLE_PREFIX + editorGamePackage, true).apply()
         renderedMapping = null
         editorCanvas?.invalidate()
@@ -1249,6 +1309,7 @@ class GameOverlayService : Service() {
         editorRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         editorRoot = null
         editorCaptureArmed = false
+        editorJoystickEditMode = false
         editorCanvas = null
         renderedMapping = null
         if (serviceActive.get()) bubbleRoot?.visibility = View.VISIBLE
