@@ -1168,6 +1168,25 @@ class GameOverlayService : Service() {
                 canvas.invalidate()
             }
         }
+        fun assignSelectedMouseButton(keyCode: Int, label: String) {
+            if (editorSelected !in editorPoints.indices) {
+                android.widget.Toast.makeText(
+                    this@GameOverlayService,
+                    "Hãy chọn hoặc thêm một điểm trước khi gán $label",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                return
+            }
+            editorPoints[editorSelected].keyCode = keyCode
+            editorCaptureArmed = false
+            canvas.invalidate()
+        }
+        tool("Trái") {
+            assignSelectedMouseButton(KeyEvent.KEYCODE_BUTTON_1, "chuột trái")
+        }
+        tool("Phải") {
+            assignSelectedMouseButton(KeyEvent.KEYCODE_BUTTON_2, "chuột phải")
+        }
         tool("Bỏ gán") {
             if (editorSelected in editorPoints.indices) {
                 editorPoints[editorSelected].keyCode = KeyEvent.KEYCODE_UNKNOWN
