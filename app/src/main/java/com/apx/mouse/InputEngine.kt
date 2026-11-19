@@ -37,6 +37,8 @@ class InputEngine(
         val maxAimStepPx: Float = 120f,
         val invertMouseY: Boolean = false,
         val smoothMouse: Boolean = false,
+        /** FPS-camera touch injection is opt-in per game profile. */
+        val fpsCameraEnabled: Boolean = false,
         val wheelSensitivity: Float = 1.0f,
         val joystickRadius: Float = 0.12f,
         val joystickCenterX: Float = 0.18f,
@@ -313,7 +315,9 @@ class InputEngine(
             dy = smoothedDy
         }
         if (dx == 0f && dy == 0f) return
-        sink.onCommand(TouchCommand.AimDelta(dx, dy))
+        if (currentConfig.fpsCameraEnabled) {
+            sink.onCommand(TouchCommand.AimDelta(dx, dy))
+        }
         moveActiveMousePointers(dx, dy)
     }
 
