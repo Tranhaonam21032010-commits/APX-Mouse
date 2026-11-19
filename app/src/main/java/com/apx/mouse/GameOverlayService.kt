@@ -554,6 +554,7 @@ class GameOverlayService : Service() {
             screenHeight = height,
             aimSensitivityX = settings.getFloat("mouse_x_factor_$gamePackage", 1.0f).coerceIn(0.1f, 3.0f),
             aimSensitivityY = settings.getFloat("mouse_y_factor_$gamePackage", 1.0f).coerceIn(0.1f, 3.0f),
+            fpsCameraEnabled = settings.getBoolean("fps_camera_enabled_$gamePackage", false),
             joystickCenterX = settings.getFloat("joystick_center_x_$gamePackage", 0.18f),
             joystickCenterY = settings.getFloat("joystick_center_y_$gamePackage", 0.78f),
             joystickRadius = settings.getFloat("joystick_radius_$gamePackage", 0.12f),
