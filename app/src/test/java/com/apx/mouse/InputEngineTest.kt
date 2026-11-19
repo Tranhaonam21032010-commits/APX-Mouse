@@ -131,6 +131,7 @@ class InputEngineTest {
             InputEngine.Config(
                 screenWidth = 1000,
                 screenHeight = 500,
+                fpsCameraEnabled = true,
                 keyBindings = mapOf(
                     KeyEvent.KEYCODE_BUTTON_2 to InputEngine.MouseButtonBinding(2, 0.75f, 0.5f)
                 )
@@ -155,6 +156,7 @@ class InputEngineTest {
             InputEngine.Config(
                 screenWidth = 1000,
                 screenHeight = 500,
+                fpsCameraEnabled = true,
                 keyBindings = mapOf(
                     KeyEvent.KEYCODE_BUTTON_1 to InputEngine.MouseButtonBinding(1, 0.2f, 0.8f)
                 )
