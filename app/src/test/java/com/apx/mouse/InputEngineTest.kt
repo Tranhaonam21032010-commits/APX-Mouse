@@ -173,6 +173,18 @@ class InputEngineTest {
         assertEquals(InputEngine.TouchCommand.Up(1), sink.commands.last())
     }
 
+    @Test fun relativeMotionDoesNotInjectFpsTouchUnlessCameraModeIsEnabled() {
+        val sink = RecordingSink()
+        val engine = InputEngine(
+            sink,
+            InputEngine.Config(screenWidth = 1000, screenHeight = 500)
+        )
+
+        engine.onRawMouseMotion(12, -8)
+
+        assertFalse(sink.commands.any { it is InputEngine.TouchCommand.AimDelta })
+    }
+
     @Test fun androidButtonStateSyncUsesKeyBindingsAsWellAsMouseFallbacks() {
         val sink = RecordingSink()
         val engine = InputEngine(
