@@ -14,6 +14,29 @@ class InputEngineTest {
         }
     }
 
+    @Test fun rawLinuxPunctuationKeyMapsToAndroidKeyCode() {
+        val sink = RecordingSink()
+        val engine = InputEngine(
+            sink,
+            InputEngine.Config(
+                screenWidth = 1000,
+                screenHeight = 500,
+                keyBindings = mapOf(
+                    KeyEvent.KEYCODE_LEFT_BRACKET to InputEngine.MouseButtonBinding(5, 0.4f, 0.4f)
+                )
+            )
+        )
+        assertTrue(engine.onRawKey("KEY_LEFTBRACE", true))
+        assertTrue(engine.onRawKey("KEY_LEFTBRACE", false))
+        assertEquals(
+            listOf(
+                InputEngine.TouchCommand.Down(5, 399.6f, 199.6f),
+                InputEngine.TouchCommand.Up(5)
+            ),
+            sink.commands
+        )
+    }
+
     @Test fun mappedKeyboardKeyProducesOneDownAndOneUp() {
         val sink = RecordingSink()
         val engine = InputEngine(
@@ -108,6 +131,7 @@ class InputEngineTest {
             InputEngine.Config(
                 screenWidth = 1000,
                 screenHeight = 500,
+                fpsCameraEnabled = true,
                 keyBindings = mapOf(
                     KeyEvent.KEYCODE_BUTTON_2 to InputEngine.MouseButtonBinding(2, 0.75f, 0.5f)
                 )
@@ -132,6 +156,7 @@ class InputEngineTest {
             InputEngine.Config(
                 screenWidth = 1000,
                 screenHeight = 500,
+                fpsCameraEnabled = true,
                 keyBindings = mapOf(
                     KeyEvent.KEYCODE_BUTTON_1 to InputEngine.MouseButtonBinding(1, 0.2f, 0.8f)
                 )
@@ -146,6 +171,18 @@ class InputEngineTest {
         assertEquals(InputEngine.TouchCommand.AimDelta(20f, 12f), sink.commands[1])
         assertFalse(sink.commands.any { it is InputEngine.TouchCommand.Move })
         assertEquals(InputEngine.TouchCommand.Up(1), sink.commands.last())
+    }
+
+    @Test fun relativeMotionDoesNotInjectFpsTouchUnlessCameraModeIsEnabled() {
+        val sink = RecordingSink()
+        val engine = InputEngine(
+            sink,
+            InputEngine.Config(screenWidth = 1000, screenHeight = 500)
+        )
+
+        engine.onRawMouseMotion(12, -8)
+
+        assertFalse(sink.commands.any { it is InputEngine.TouchCommand.AimDelta })
     }
 
     @Test fun androidButtonStateSyncUsesKeyBindingsAsWellAsMouseFallbacks() {

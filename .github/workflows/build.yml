@@ -41,7 +41,7 @@ jobs:
       - name: Install Android SDK packages
         shell: bash
         run: |
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4

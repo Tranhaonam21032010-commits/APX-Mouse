@@ -50,6 +50,10 @@ class GameOverlayService : Service() {
     @Volatile private var editorRoot: FrameLayout? = null
     private var editorCaptureArmed = false
     private val editorPoints = mutableListOf<EditorPoint>()
+    private var editorJoystickCenterX = 0.18f
+    private var editorJoystickCenterY = 0.78f
+    private var editorJoystickRadius = 0.12f
+    private var editorJoystickEditMode = false
     @Volatile private var editorSelected = -1
     private var editorGamePackage = ""
     private var editorCanvas: View? = null
@@ -79,10 +83,12 @@ class GameOverlayService : Service() {
     @Volatile private var inputSessionAllowed = false
     @Volatile private var inputSessionActive = false
     @Volatile private var inputCaptureRunning = false
+    @Volatile private var inputTypingModeEnabled = false
     @Volatile private var lastInputStartAttemptAt = 0L
     @Volatile private var inputEngine: InputEngine? = null
     @Volatile private var inputBackend: ShizukuInputBackend? = null
     private val evdevParser = EvdevInputEventParser()
+    private val nativeEventParser = NativeInputEventParser()
 
     private val inputEventListener = object : IInputEventListener.Stub() {
         override fun onInputEventBatch(lines: Array<out String>) {
@@ -92,34 +98,20 @@ class GameOverlayService : Service() {
                     if (!inputSessionActive) return@execute
                     val engine = inputEngine ?: return@execute
                     safeLines.forEach { line ->
-                        evdevParser.parseLine(line).forEach { event ->
-                            when (event) {
-                                is EvdevInputEventParser.Event.Key -> {
-                                    if (editorRoot != null) {
-                                        if (event.pressed && !event.repeat) {
-                                            evdevKeyCode(event.code)?.let(::assignEditorKey)
-                                        }
-                                    } else {
-                                        engine.onRawKey(event.code, event.pressed)
-                                    }
-                                }
-                                is EvdevInputEventParser.Event.MouseButton -> {
-                                    if (editorRoot != null) {
-                                        if (event.pressed) {
-                                            evdevMouseButtonKeyCode(event.code)?.let(::assignEditorKey)
-                                        }
-                                    } else {
-                                        engine.onRawMouseButton(event.code, event.pressed)
-                                    }
-                                }
-                                is EvdevInputEventParser.Event.Relative -> {
-                                    if (editorRoot == null) {
-                                        engine.onRawMouseMotion(event.dx, event.dy)
-                                        engine.onRawWheel(event.wheelX, event.wheelY)
-                                    }
-                                }
-                            }
-                        }
+                        evdevParser.parseLine(line).forEach { event -> dispatchInputEvent(event, engine) }
+                    }
+                }
+            }
+        }
+
+        override fun onNativeInputEventBatch(eventTuples: IntArray) {
+            val safeTuples = eventTuples.copyOf(eventTuples.size.coerceAtMost(1024))
+            runCatching {
+                inputDispatchExecutor.execute {
+                    if (!inputSessionActive) return@execute
+                    val engine = inputEngine ?: return@execute
+                    nativeEventParser.parseBatch(safeTuples).forEach { event ->
+                        dispatchInputEvent(event, engine)
                     }
                 }
             }
@@ -151,7 +143,7 @@ class GameOverlayService : Service() {
                         backend?.close()
                         inputCaptureRunning = false
                         runCatching {
-                            inputDispatchExecutor.execute { evdevParser.reset() }
+                            inputDispatchExecutor.execute { evdevParser.reset(); nativeEventParser.reset() }
                         }
                     }
                 }
@@ -209,6 +201,8 @@ class GameOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        inputTypingModeEnabled = getSharedPreferences("apx_mouse", MODE_PRIVATE)
+            .getBoolean("input_typing_mode", false)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
@@ -295,7 +289,8 @@ class GameOverlayService : Service() {
         // touchable window would steal taps from the game across its whole rectangle.
         val positions = listOf(
             Triple(96, 0, 52), Triple(30, 46, 52), Triple(0, 106, 52),
-            Triple(36, 166, 52), Triple(112, 166, 52), Triple(172, 46, 52), Triple(172, 106, 52)
+            Triple(36, 166, 52), Triple(112, 166, 52), Triple(172, 46, 52), Triple(172, 106, 52),
+            Triple(172, 166, 52)
         )
         val actions = listOf(
             createAction("⌨", "Chỉnh sửa keymap") { openMappingEditor() },
@@ -308,7 +303,8 @@ class GameOverlayService : Service() {
             },
             createAction("⚙", "Chỉnh độ phân giải game") { openDisplayScale() },
             createAction("⌄", "Đóng menu") { setFanOpen(false) },
-            createAction("×", "Tắt overlay APX") { stopSelf() }
+            createAction("×", "Tắt overlay APX") { stopSelf() },
+            createAction("T", "Chế độ gõ: nhả bàn phím") { toggleInputTypingMode() }
         )
         actions.forEachIndexed { index, view ->
             val (left, top, size) = positions[index]
@@ -400,6 +396,47 @@ class GameOverlayService : Service() {
         }
     }
 
+    private fun dispatchInputEvent(event: EvdevInputEventParser.Event, engine: InputEngine) {
+        when (event) {
+            is EvdevInputEventParser.Event.Key -> {
+                if (inputTypingModeEnabled) return
+                if (editorRoot != null) {
+                    if (event.pressed && !event.repeat) evdevKeyCode(event.code)?.let(::assignEditorKey)
+                } else engine.onRawKey(event.code, event.pressed)
+            }
+            is EvdevInputEventParser.Event.MouseButton -> {
+                if (editorRoot != null) {
+                    if (event.pressed) evdevMouseButtonKeyCode(event.code)?.let(::assignEditorKey)
+                } else engine.onRawMouseButton(event.code, event.pressed)
+            }
+            is EvdevInputEventParser.Event.Relative -> {
+                if (editorRoot == null) {
+                    engine.onRawMouseMotion(event.dx, event.dy)
+                    engine.onRawWheel(event.wheelX, event.wheelY)
+                }
+            }
+        }
+    }
+
+    private fun toggleInputTypingMode() {
+        val enabled = !inputTypingModeEnabled
+        inputTypingModeEnabled = enabled
+        getSharedPreferences("apx_mouse", MODE_PRIVATE).edit()
+            .putBoolean("input_typing_mode", enabled)
+            .apply()
+        inputControlExecutor.execute {
+            val result = DisplayScaleController.setInputTypingMode(enabled)
+            handler.post {
+                val message = if (enabled) {
+                    "Chế độ gõ bật: bàn phím được nhả khỏi mapping"
+                } else {
+                    "Chế độ gõ tắt: bàn phím được đưa lại vào mapping"
+                }
+                android.widget.Toast.makeText(this@GameOverlayService, if (result.success) message else result.output, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     private fun startInputCaptureIfEnabled() {
         if (!inputSessionAllowed || inputCaptureRunning || inputCaptureStarting.get()) return
         val settings = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
@@ -434,6 +471,7 @@ class GameOverlayService : Service() {
                     }
                     if (!inputSessionAllowed || !serviceActive.get()) return@execute
 
+                    DisplayScaleController.setInputTypingMode(inputTypingModeEnabled)
                     val engineConfig = createGameInputConfig()
                     val createdBackend = ShizukuInputBackend(object : ShizukuInputBackend.Listener {
                         override fun onStatus(message: String) {
@@ -442,12 +480,13 @@ class GameOverlayService : Service() {
                         override fun onTapResult(success: Boolean, message: String) {
                             if (!success) android.util.Log.w("APX-MOUSE-INPUT", message)
                         }
-                    })
+                    }, engineConfig.screenWidth, engineConfig.screenHeight)
                     backend = createdBackend
                     val engine = InputEngine(createdBackend, engineConfig)
                     inputBackend = createdBackend
                     inputEngine = engine
                     evdevParser.reset()
+                    nativeEventParser.reset()
                     inputSessionActive = true
 
                     // Set before the Binder call: getevent can exit and report its callback
@@ -466,7 +505,7 @@ class GameOverlayService : Service() {
                         postInputStatus(result.output)
                         return@execute
                     }
-                    postInputStatus("Đã bật nhận chuột / bàn phím cho phiên game.")
+                    postInputStatus("Đã bật nhận chuột / bàn phím cho phiên game: ${result.output.take(180)}")
                 } catch (e: Exception) {
                     inputCaptureRunning = false
                     inputSessionActive = false
@@ -517,8 +556,9 @@ class GameOverlayService : Service() {
         return InputEngine.Config(
             screenWidth = width,
             screenHeight = height,
-            aimSensitivityX = settings.getFloat("mouse_x_factor_$gamePackage", 1.0f).coerceIn(0.1f, 3.0f),
-            aimSensitivityY = settings.getFloat("mouse_y_factor_$gamePackage", 1.0f).coerceIn(0.1f, 3.0f),
+            aimSensitivityX = (settings.getInt("mouse_x_$gamePackage", 100) / 100f).coerceIn(0.1f, 3.0f),
+            aimSensitivityY = (settings.getInt("mouse_y_$gamePackage", 100) / 100f).coerceIn(0.1f, 3.0f),
+            fpsCameraEnabled = settings.getBoolean("fps_camera_enabled_$gamePackage", false),
             joystickCenterX = settings.getFloat("joystick_center_x_$gamePackage", 0.18f),
             joystickCenterY = settings.getFloat("joystick_center_y_$gamePackage", 0.78f),
             joystickRadius = settings.getFloat("joystick_radius_$gamePackage", 0.12f),
@@ -541,7 +581,7 @@ class GameOverlayService : Service() {
                 inputBackend = null
                 backend?.close()
                 inputCaptureRunning = false
-                runCatching { inputDispatchExecutor.execute { evdevParser.reset() } }
+                runCatching { inputDispatchExecutor.execute { evdevParser.reset(); nativeEventParser.reset() } }
             }
         }
     }
@@ -991,7 +1031,12 @@ class GameOverlayService : Service() {
         editorPoints.clear()
         editorSelected = -1
         editorCaptureArmed = false
-        val raw = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE).getString(KEY_PREFIX + editorGamePackage, null)
+        editorJoystickEditMode = false
+        val editorPrefs = getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE)
+        editorJoystickCenterX = editorPrefs.getFloat("joystick_center_x_$editorGamePackage", 0.18f).coerceIn(0.05f, 0.95f)
+        editorJoystickCenterY = editorPrefs.getFloat("joystick_center_y_$editorGamePackage", 0.78f).coerceIn(0.05f, 0.95f)
+        editorJoystickRadius = editorPrefs.getFloat("joystick_radius_$editorGamePackage", 0.12f).coerceIn(0.04f, 0.30f)
+        val raw = editorPrefs.getString(KEY_PREFIX + editorGamePackage, null)
         try {
             if (!raw.isNullOrBlank()) {
                 val array = JSONArray(raw)
@@ -1030,6 +1075,21 @@ class GameOverlayService : Service() {
             private var dragging = false
             override fun onDraw(c: Canvas) {
                 super.onDraw(c)
+                val joystickRadiusPx = editorJoystickRadius * minOf(width, height)
+                val joystickX = editorJoystickCenterX * width
+                val joystickY = editorJoystickCenterY * height
+                p.style = Paint.Style.FILL
+                p.color = Color.argb(45, 0, 190, 255)
+                c.drawCircle(joystickX, joystickY, joystickRadiusPx, p)
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = dp(3).toFloat()
+                p.color = if (editorJoystickEditMode) Color.rgb(255, 190, 70) else Color.rgb(0, 190, 255)
+                c.drawCircle(joystickX, joystickY, joystickRadiusPx, p)
+                p.style = Paint.Style.FILL
+                p.color = Color.WHITE
+                p.textSize = dp(12).toFloat()
+                p.textAlign = Paint.Align.CENTER
+                c.drawText("JOYSTICK", joystickX, joystickY + dp(4).toFloat(), p)
                 editorPoints.forEachIndexed { index, point ->
                     val cx = point.x * width
                     val cy = point.y * height
@@ -1051,6 +1111,14 @@ class GameOverlayService : Service() {
             override fun onTouchEvent(e: MotionEvent): Boolean {
                 when (e.action) {
                     MotionEvent.ACTION_DOWN -> {
+                        if (editorJoystickEditMode) {
+                            editorJoystickCenterX = (e.x / width.coerceAtLeast(1)).coerceIn(0.05f, 0.95f)
+                            editorJoystickCenterY = (e.y / height.coerceAtLeast(1)).coerceIn(0.05f, 0.95f)
+                            dragging = true
+                            editorSelected = -1
+                            invalidate()
+                            return true
+                        }
                         val hit = editorPoints.indices.reversed().firstOrNull { i ->
                             val dx = editorPoints[i].x * width - e.x
                             val dy = editorPoints[i].y * height - e.y
@@ -1079,7 +1147,12 @@ class GameOverlayService : Service() {
                         root.requestFocus()
                         return true
                     }
-                    MotionEvent.ACTION_MOVE -> if (dragging && editorSelected in editorPoints.indices) {
+                    MotionEvent.ACTION_MOVE -> if (dragging && editorJoystickEditMode) {
+                        editorJoystickCenterX = (e.x / width.coerceAtLeast(1)).coerceIn(0.05f, 0.95f)
+                        editorJoystickCenterY = (e.y / height.coerceAtLeast(1)).coerceIn(0.05f, 0.95f)
+                        invalidate()
+                        return true
+                    } else if (dragging && editorSelected in editorPoints.indices) {
                         editorPoints[editorSelected].x = (e.x / width.coerceAtLeast(1)).coerceIn(0f, 1f)
                         editorPoints[editorSelected].y = (e.y / height.coerceAtLeast(1)).coerceIn(0f, 1f)
                         invalidate()
@@ -1110,7 +1183,27 @@ class GameOverlayService : Service() {
                 isClickable = true; setOnClickListener { action() }
             }, LinearLayout.LayoutParams(-2, dp(42)))
         }
+        tool("Joystick") {
+            editorJoystickEditMode = !editorJoystickEditMode
+            editorSelected = -1
+            editorCaptureArmed = false
+            android.widget.Toast.makeText(
+                this@GameOverlayService,
+                if (editorJoystickEditMode) "Kéo trên màn hình để đặt tâm joystick" else "Đã khóa chỉnh vị trí joystick",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            canvas.invalidate()
+        }
+        tool("J−") {
+            editorJoystickRadius = (editorJoystickRadius - 0.01f).coerceAtLeast(0.04f)
+            canvas.invalidate()
+        }
+        tool("J+") {
+            editorJoystickRadius = (editorJoystickRadius + 0.01f).coerceAtMost(0.30f)
+            canvas.invalidate()
+        }
         tool("＋ Thêm") {
+            editorJoystickEditMode = false
             if (editorPoints.size >= MAX_MAPPED_POINTS) {
                 android.widget.Toast.makeText(
                     this@GameOverlayService,
@@ -1132,6 +1225,25 @@ class GameOverlayService : Service() {
                 canvas.invalidate()
             }
         }
+        fun assignSelectedMouseButton(keyCode: Int, label: String) {
+            if (editorSelected !in editorPoints.indices) {
+                android.widget.Toast.makeText(
+                    this@GameOverlayService,
+                    "Hãy chọn hoặc thêm một điểm trước khi gán $label",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                return
+            }
+            editorPoints[editorSelected].keyCode = keyCode
+            editorCaptureArmed = false
+            canvas.invalidate()
+        }
+        tool("Trái") {
+            assignSelectedMouseButton(KeyEvent.KEYCODE_BUTTON_1, "chuột trái")
+        }
+        tool("Phải") {
+            assignSelectedMouseButton(KeyEvent.KEYCODE_BUTTON_2, "chuột phải")
+        }
         tool("Bỏ gán") {
             if (editorSelected in editorPoints.indices) {
                 editorPoints[editorSelected].keyCode = KeyEvent.KEYCODE_UNKNOWN
@@ -1145,7 +1257,7 @@ class GameOverlayService : Service() {
             topMargin = dp(8)
         })
         val hint = TextView(this).apply {
-            text = "Chạm vị trí để thêm · Kéo để di chuyển · Chọn điểm rồi bấm phím hoặc nút chuột để gán (tối đa 9 điểm)"
+            text = "Joystick: chọn Joystick rồi kéo tâm; J−/J+ chỉnh bán kính · Thêm điểm và gán phím/chuột (tối đa 9 điểm)"
             textSize = 11f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             setPadding(dp(8), dp(5), dp(8), dp(5))
             background = GradientDrawable().apply {
@@ -1184,6 +1296,9 @@ class GameOverlayService : Service() {
         }
         getSharedPreferences(MAPPING_PREFS, MODE_PRIVATE).edit()
             .putString(KEY_PREFIX + editorGamePackage, array.toString())
+            .putFloat("joystick_center_x_$editorGamePackage", editorJoystickCenterX)
+            .putFloat("joystick_center_y_$editorGamePackage", editorJoystickCenterY)
+            .putFloat("joystick_radius_$editorGamePackage", editorJoystickRadius)
             .putBoolean(VISIBLE_PREFIX + editorGamePackage, true).apply()
         renderedMapping = null
         editorCanvas?.invalidate()
@@ -1194,6 +1309,7 @@ class GameOverlayService : Service() {
         editorRoot?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         editorRoot = null
         editorCaptureArmed = false
+        editorJoystickEditMode = false
         editorCanvas = null
         renderedMapping = null
         if (serviceActive.get()) bubbleRoot?.visibility = View.VISIBLE

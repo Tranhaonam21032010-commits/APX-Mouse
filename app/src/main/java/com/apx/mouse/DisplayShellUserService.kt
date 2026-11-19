@@ -10,12 +10,28 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 
 /**
- * Runs as Shizuku shell/root identity. Only display-related wm commands are accepted.
+ * Runs as Shizuku UserService identity for display commands and selected evdev input capture.
  */
-class DisplayShellUserService : IDisplayShellService.Stub() {
+class DisplayShellUserService : IDisplayShellService.Stub(), NativeEvdevCapture.Callback {
     private val inputCaptureLock = Any()
     @Volatile private var inputCaptureProcess: Process? = null
     @Volatile private var inputCaptureThread: Thread? = null
+    @Volatile private var nativeInputCaptureActive = false
+    @Volatile private var nativeInputListener: IInputEventListener? = null
+    @Volatile private var inputTypingModeEnabled = false
+
+    override fun onNativeInputEventBatch(eventTuples: IntArray) {
+        runCatching { nativeInputListener?.onNativeInputEventBatch(eventTuples) }
+    }
+
+    override fun onNativeInputCaptureEnded(errorCode: Int) {
+        nativeInputCaptureActive = false
+        val listener = nativeInputListener
+        nativeInputListener = null
+        if (errorCode != 0) {
+            runCatching { listener?.onInputCaptureEnded("Native input capture ended (errno=$errorCode)") }
+        }
+    }
 
     override fun destroy() {
         stopInputCapture()
@@ -99,15 +115,41 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
         ) return "ERROR: Chọn từ 1 đến 8 thiết bị input hợp lệ"
 
         synchronized(inputCaptureLock) {
-            if (inputCaptureProcess != null) {
+            if (inputCaptureProcess != null || nativeInputCaptureActive) {
                 return "ERROR: Phiên đọc input đang chạy"
             }
+
+            // Prefer native exclusive capture. Keep getevent as a non-exclusive compatibility fallback.
+            nativeInputListener = listener
+            nativeInputCaptureActive = true
+            val nativeResult = runCatching {
+                NativeEvdevCapture.startNative(paths.toTypedArray(), this)
+            }.getOrElse { -1 }
+            if (nativeResult == 0) {
+                if (inputTypingModeEnabled) {
+                    // Typing mode mirrors K7XD: release keyboard nodes while keeping mouse grabbed.
+                    runCatching { NativeEvdevCapture.setKeyboardGrabEnabledNative(false) }
+                }
+                return "OK: Native input capture active (EVIOCGRAB), ${paths.size} devices"
+            }
+            nativeInputCaptureActive = false
+            nativeInputListener = null
 
             val command = listOf("getevent", "-lt") + paths
             val process = try {
                 ProcessBuilder(command).redirectErrorStream(true).start()
             } catch (e: Exception) {
                 return "ERROR: Không khởi động được getevent: ${e.message ?: e.javaClass.simpleName}"
+            }
+
+            // getevent commonly exits immediately when Shizuku cannot read a selected
+            // node. Detect that here so the UI does not briefly report a false "OK".
+            if (waitForProcessExit(process, 160L)) {
+                val diagnostic = runCatching {
+                    process.inputStream.bufferedReader().use { it.readText().take(2_000) }
+                }.getOrDefault("")
+                return InputCaptureStartup.failure(process.exitValue(), diagnostic) +
+                    " | Native capture unavailable (code $nativeResult)"
             }
 
             inputCaptureProcess = process
@@ -121,7 +163,41 @@ class DisplayShellUserService : IDisplayShellService.Stub() {
         return "OK: Đang đọc ${paths.size} thiết bị input đã chọn"
     }
 
+    override fun setInputTypingMode(enabled: Boolean): String {
+        inputTypingModeEnabled = enabled
+        if (!nativeInputCaptureActive) {
+            return "OK: Typing mode will apply when native capture starts"
+        }
+        return try {
+            val result = NativeEvdevCapture.setKeyboardGrabEnabledNative(!enabled)
+            when {
+                result == 0 && enabled -> "OK: Typing mode on; keyboard released, mouse remains grabbed"
+                result == 0 -> "OK: Typing mode off; keyboard grabbed again"
+                result == -19 -> "OK: No keyboard device is currently selected"
+                else -> "ERROR: Cannot change keyboard grab state (code $result)"
+            }
+        } catch (e: Throwable) {
+            "ERROR: Typing mode change failed: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
     override fun stopInputCapture(): String {
+        val stopNative = synchronized(inputCaptureLock) {
+            if (nativeInputCaptureActive) {
+                nativeInputCaptureActive = false
+                nativeInputListener = null
+                true
+            } else false
+        }
+        if (stopNative) {
+            return try {
+                NativeEvdevCapture.stopNative()
+                "OK: Native input capture stopped and devices ungrabbed"
+            } catch (e: Throwable) {
+                "ERROR: Native input stop failed: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+
         val session = synchronized(inputCaptureLock) {
             val current = inputCaptureProcess to inputCaptureThread
             inputCaptureProcess = null

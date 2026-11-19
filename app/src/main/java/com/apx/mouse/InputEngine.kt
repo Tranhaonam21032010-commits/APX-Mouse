@@ -37,6 +37,8 @@ class InputEngine(
         val maxAimStepPx: Float = 120f,
         val invertMouseY: Boolean = false,
         val smoothMouse: Boolean = false,
+        /** FPS-camera touch injection is opt-in per game profile. */
+        val fpsCameraEnabled: Boolean = false,
         val wheelSensitivity: Float = 1.0f,
         val joystickRadius: Float = 0.12f,
         val joystickCenterX: Float = 0.18f,
@@ -313,7 +315,9 @@ class InputEngine(
             dy = smoothedDy
         }
         if (dx == 0f && dy == 0f) return
-        sink.onCommand(TouchCommand.AimDelta(dx, dy))
+        if (currentConfig.fpsCameraEnabled) {
+            sink.onCommand(TouchCommand.AimDelta(dx, dy))
+        }
         moveActiveMousePointers(dx, dy)
     }
 
@@ -423,6 +427,24 @@ class InputEngine(
             "RIGHTCTRL" -> "CTRL_RIGHT"
             "LEFTALT" -> "ALT_LEFT"
             "RIGHTALT" -> "ALT_RIGHT"
+            "LEFTBRACE" -> "LEFT_BRACKET"
+            "RIGHTBRACE" -> "RIGHT_BRACKET"
+            "DOT" -> "PERIOD"
+            "EQUAL" -> "EQUALS"
+            "KPPLUS" -> "NUMPAD_ADD"
+            "KPMINUS" -> "NUMPAD_SUBTRACT"
+            "KPSLASH" -> "NUMPAD_DIVIDE"
+            "KPDOT" -> "NUMPAD_DOT"
+            "KP0" -> "NUMPAD_0"
+            "KP1" -> "NUMPAD_1"
+            "KP2" -> "NUMPAD_2"
+            "KP3" -> "NUMPAD_3"
+            "KP4" -> "NUMPAD_4"
+            "KP5" -> "NUMPAD_5"
+            "KP6" -> "NUMPAD_6"
+            "KP7" -> "NUMPAD_7"
+            "KP8" -> "NUMPAD_8"
+            "KP9" -> "NUMPAD_9"
             "LEFTMETA" -> "META_LEFT"
             "RIGHTMETA" -> "META_RIGHT"
             "CAPSLOCK" -> "CAPS_LOCK"
@@ -435,7 +457,27 @@ class InputEngine(
             "KPENTER" -> "NUMPAD_ENTER"
             else -> suffix
         }
-        val code = KeyEvent.keyCodeFromString("KEYCODE_$androidSuffix")
+        val code = when (suffix) {
+            "LEFTBRACE" -> KeyEvent.KEYCODE_LEFT_BRACKET
+            "RIGHTBRACE" -> KeyEvent.KEYCODE_RIGHT_BRACKET
+            "DOT" -> KeyEvent.KEYCODE_PERIOD
+            "EQUAL" -> KeyEvent.KEYCODE_EQUALS
+            "KPPLUS" -> KeyEvent.KEYCODE_NUMPAD_ADD
+            "KPMINUS" -> KeyEvent.KEYCODE_NUMPAD_SUBTRACT
+            "KPSLASH" -> KeyEvent.KEYCODE_NUMPAD_DIVIDE
+            "KPDOT" -> KeyEvent.KEYCODE_NUMPAD_DOT
+            "KP0" -> KeyEvent.KEYCODE_NUMPAD_0
+            "KP1" -> KeyEvent.KEYCODE_NUMPAD_1
+            "KP2" -> KeyEvent.KEYCODE_NUMPAD_2
+            "KP3" -> KeyEvent.KEYCODE_NUMPAD_3
+            "KP4" -> KeyEvent.KEYCODE_NUMPAD_4
+            "KP5" -> KeyEvent.KEYCODE_NUMPAD_5
+            "KP6" -> KeyEvent.KEYCODE_NUMPAD_6
+            "KP7" -> KeyEvent.KEYCODE_NUMPAD_7
+            "KP8" -> KeyEvent.KEYCODE_NUMPAD_8
+            "KP9" -> KeyEvent.KEYCODE_NUMPAD_9
+            else -> KeyEvent.keyCodeFromString("KEYCODE_$androidSuffix")
+        }
         return code.takeIf { it != KeyEvent.KEYCODE_UNKNOWN }
     }
 

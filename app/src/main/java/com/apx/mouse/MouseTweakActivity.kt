@@ -22,6 +22,7 @@ class MouseTweakActivity : Activity() {
     private var gamePackage = ""
     private var sensitivityX = 100
     private var sensitivityY = 100
+    private var fpsCameraEnabled = false
     private var cursorStyle = 0
     private var cursorColor = 0
     private var rainbow = false
@@ -37,6 +38,7 @@ class MouseTweakActivity : Activity() {
         val suffix = gamePackage
         sensitivityX = prefs.getInt("mouse_x_$suffix", 100)
         sensitivityY = prefs.getInt("mouse_y_$suffix", 100)
+        fpsCameraEnabled = prefs.getBoolean("fps_camera_enabled_$suffix", false)
         cursorStyle = prefs.getInt("mouse_style_$suffix", 0)
         cursorColor = prefs.getInt("mouse_color_$suffix", 0)
         rainbow = prefs.getBoolean("mouse_rainbow_$suffix", false)
@@ -62,6 +64,15 @@ class MouseTweakActivity : Activity() {
         valueY = text("Trục Y: $sensitivityY%", 16f, Color.WHITE, true)
         content.addView(valueY)
         content.addView(seekBar(sensitivityY) { sensitivityY = it; valueY.text = "Trục Y: $it%" })
+        content.addView(section("FPS CAMERA / MOUSE LOOK"))
+        content.addView(text("Chỉ bật khi muốn rê chuột để điều khiển góc nhìn. Khi tắt, APX không tự chạm vào tâm màn hình.", 13f, Color.LTGRAY))
+        content.addView(Switch(this).apply {
+            text = "Bật FPS Mouse Look"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            isChecked = fpsCameraEnabled
+            setOnCheckedChangeListener { _, checked -> fpsCameraEnabled = checked }
+        })
 
         content.addView(section("KIỂU CON TRỎ"))
         val styles = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
@@ -113,6 +124,7 @@ class MouseTweakActivity : Activity() {
             prefs.edit()
                 .putInt("mouse_x_$suffix", sensitivityX)
                 .putInt("mouse_y_$suffix", sensitivityY)
+                .putBoolean("fps_camera_enabled_$suffix", fpsCameraEnabled)
                 .putInt("mouse_style_$suffix", cursorStyle)
                 .putInt("mouse_color_$suffix", cursorColor)
                 .putBoolean("mouse_rainbow_$suffix", rainbow)
